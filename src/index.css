@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 30 45% 98%;
+    --background-warm: 28 33% 93%;
+    --foreground: 30 8% 16%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 30 8% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 8% 16%;
+
+    --primary: 11 80% 57%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 11 100% 71%;
+
+    --secondary: 162 51% 36%;
+    --secondary-foreground: 0 0% 100%;
+    --secondary-light: 162 40% 50%;
+
+    --muted: 28 15% 85%;
+    --muted-foreground: 25 8% 42%;
+
+    --accent: 11 100% 71%;
+    --accent-foreground: 30 8% 16%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 36 100% 50%;
+    --warning-foreground: 30 8% 16%;
+    --info: 207 90% 54%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 28 15% 85%;
+    --input: 28 15% 85%;
+    --ring: 11 80% 57%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 30 30% 97%;
+    --sidebar-foreground: 30 8% 16%;
+    --sidebar-primary: 11 80% 57%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 28 20% 93%;
+    --sidebar-accent-foreground: 30 8% 16%;
+    --sidebar-border: 28 15% 85%;
+    --sidebar-ring: 11 80% 57%;
+
+    --shadow-soft: 0 2px 12px -2px hsl(30 8% 16% / 0.06);
+    --shadow-medium: 0 4px 24px -4px hsl(30 8% 16% / 0.08);
+    --shadow-elevated: 0 8px 32px -6px hsl(30 8% 16% / 0.12);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@layer utilities {
+  .prose-tupi {
+    max-width: 65ch;
+    line-height: 1.6;
+  }
+
+  .surface-card {
+    @apply bg-card border border-border rounded-xl;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .surface-card-hover {
+    @apply bg-card border border-border rounded-xl transition-all duration-300;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .surface-card-hover:hover {
+    box-shadow: var(--shadow-medium);
+    transform: translateY(-2px);
+  }
+
+  .gradient-primary {
+    background: hsl(var(--primary));
+  }
+
+  .gradient-secondary {
+    background: hsl(var(--secondary));
+  }
+}

@@ -1,0 +1,10 @@
+project_id = "wolpyiudmyiflqlgvlpu"
+
+[functions.chat]
+verify_jwt = false
+
+[functions.generate-document]
+verify_jwt = false
+
+[functions.adapt-activity]
+verify_jwt = false
