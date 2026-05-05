@@ -160,26 +160,61 @@ Retorne APENAS a imagem da folha de atividade, sem qualquer texto explicativo.`;
     };
     const cleanInput = stripPreamble(content || "");
 
-    const docPrompt = `Gere um documento HTML completo e bem formatado com o seguinte conteúdo.
-Use CSS inline para estilizar o documento de forma profissional e adequada para impressão.
-O documento deve ter:
-- Margens adequadas (margin: 20mm em cada lado)
-- Fonte legível (Arial, 14px para corpo, 24px para títulos)
-- Cabeçalho com título centralizado
-- Conteúdo bem organizado com parágrafos, listas e tabelas quando necessário
-- Cada seção principal deve estar dentro de uma <div data-pdf-section="true"> para controle de quebra de página
-- Rodapé com "Gerado por TUPI - Tecnologia Universal para Práticas da Inclusão"
+    const docPrompt = `Gere uma FOLHA DE ATIVIDADE ESCOLAR em HTML, no formato de um worksheet pedagógico imprimível tipo material que professor distribui para os alunos.
+
+ESTRUTURA OBRIGATÓRIA (nessa ordem):
+
+1. CABEÇALHO INSTITUCIONAL (no topo, com borda inferior fina cinza):
+   - Linha 1: pequena tag "ATIVIDADE PEDAGÓGICA" em letras espaçadas (letter-spacing) e cor cinza
+   - Linha 2: título grande em negrito (use o título informado: "${title || "Atividade"}")
+   - Linha 3: pequeno subtítulo opcional com a disciplina/tema, em cinza
+
+2. CAMPOS DO ALUNO (logo abaixo do cabeçalho, em uma única linha horizontal usando flex/grid):
+   <div style="display: flex; gap: 24px; margin: 16px 0; padding: 12px 0; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; font-size: 11pt;">
+     <div style="flex: 2;">Nome: <span style="display:inline-block; border-bottom: 1px solid #333; min-width: 200px; height: 18px;"></span></div>
+     <div style="flex: 1;">Turma: <span style="display:inline-block; border-bottom: 1px solid #333; min-width: 80px; height: 18px;"></span></div>
+     <div style="flex: 1;">Data: ___/___/______</div>
+   </div>
+
+3. INSTRUÇÕES DA ATIVIDADE (em uma caixa com fundo levemente cinza, borda esquerda colorida):
+   <div style="background: #f5f5f5; border-left: 4px solid #4F46E5; padding: 12px 16px; margin: 16px 0; font-size: 11pt;">
+     <strong>📚 Instruções:</strong> [1-3 frases curtas explicando o que o aluno deve fazer]
+   </div>
+
+4. EXERCÍCIOS NUMERADOS:
+   - Cada exercício em uma <div data-pdf-section="true"> separada
+   - Use formato: número grande (24px, negrito, cor primária) ao lado da pergunta
+   - Espaços de resposta visíveis e adequados ao tipo:
+     * Resposta curta: linha contínua de underscores
+     * Resposta longa: caixa com bordas (height adequado, ~60-100px)
+     * Múltipla escolha: ( ) opção A    ( ) opção B    ( ) opção C
+     * Ligar/Associar: duas colunas com itens de cada lado
+     * Completar palavra: <span style="font-family:'Courier New',monospace; letter-spacing:4px; font-weight:bold; font-size:14pt;">b_l_</span>
+     * Desenhar: caixa quadrada com bordas tracejadas (border: 1px dashed #999)
+
+5. RODAPÉ DISCRETO (no final, fonte pequena cinza, centralizado):
+   "Gerado por TUPI · Tecnologia Universal para Práticas da Inclusão"
+
+ESTILO GERAL (incluir no <style> ou inline no body):
+- Fonte: 'Helvetica', 'Arial', sans-serif
+- Tamanho corpo: 12pt
+- Margens: 20mm em todos os lados (use @page { margin: 20mm; })
+- Cor primária: #4F46E5 (índigo)
+- Espaçamento entre exercícios: margin-top: 20px
+- Linhas de resposta: height ajustado pra caber a escrita à mão (~24px mínimo)
 
 REGRAS ABSOLUTAS:
-1. NUNCA inclua frases como "Como assistente de IA", "não consigo gerar arquivo", "no entanto, o conteúdo abaixo está formatado", "sou uma IA baseada em texto" ou QUALQUER variação de recusa/desculpa. PROIBIDO em qualquer parte do HTML.
-2. Para lacunas de COMPLETAR PALAVRAS, use uma sequência CONTÍNUA de underscores SEM espaços (ex: "____________"). NUNCA escreva "_ _ _ _ _" com espaços — isso quebra a renderização no PDF.
-3. Para completar letras (ex: palavra "bola" com vogais ocultas), escreva as letras coladas: "b_l_" — exatamente 4 caracteres, SEM espaços. Envolva em <span style="white-space:nowrap; font-family:'Courier New',monospace; letter-spacing:3px; font-weight:bold;">b_l_</span> para evitar quebra.
-4. Separe o conteúdo em seções lógicas usando <div data-pdf-section="true">. Cada seção será tratada como um bloco que não será cortado ao meio na geração do PDF.
+1. NUNCA escreva frases como "Como IA…", "não posso gerar…", "sou um modelo…", "no entanto…" — PROIBIDO em qualquer lugar.
+2. Underscores: SEM ESPAÇOS entre eles. "___________" certo, "_ _ _ _" errado.
+3. Letras a completar: coladas, sem espaços. "b_l_" certo (4 caracteres).
+4. Cada exercício DEVE estar em <div data-pdf-section="true"> separada — isso evita cortar exercício no meio na quebra de página.
+5. NÃO use cores muito saturadas, fundos muito chamativos, nem fontes decorativas. É uma folha de atividade — tem que ser limpa, clara e profissional.
+6. Use ÍCONES EMOJIS pequenos APENAS em títulos de seção (📚 ✏️ 📝 ✂️) — não exagera.
 
-Título: ${title || "Documento"}
-Conteúdo: ${cleanInput}
+CONTEÚDO DA ATIVIDADE:
+${cleanInput}
 
-Retorne APENAS o HTML completo, sem explicações, sem preâmbulo, sem markdown. Comece direto com <!DOCTYPE html>.`;
+Retorne APENAS o HTML completo, do <!DOCTYPE html> ao </html>. Sem markdown, sem preâmbulo, sem blocos de código.`;
 
     const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",

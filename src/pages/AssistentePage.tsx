@@ -654,18 +654,25 @@ const AssistentePage = () => {
             </motion.div>
           ))}
           {isLoading && !messages.some((m) => m.id.startsWith("stream-")) && (
-            <div className="flex gap-3">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex gap-3"
+            >
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
                 <Bot className="h-4 w-4 text-primary-foreground" />
               </div>
-              <div className="bg-card border border-border rounded-2xl rounded-bl-md px-4 py-3">
-                <div className="flex gap-1">
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-pulse" />
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:0.2s]" />
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:0.4s]" />
-                </div>
+              <div className="bg-card border border-border rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-2.5">
+                <span className="text-sm font-medium bg-gradient-to-r from-muted-foreground via-foreground to-muted-foreground bg-[length:200%_100%] bg-clip-text text-transparent animate-[shimmer_2s_linear_infinite]">
+                  Pensando
+                </span>
+                <span className="flex gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.15s]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.3s]" />
+                </span>
               </div>
-            </div>
+            </motion.div>
           )}
         </div>
 
