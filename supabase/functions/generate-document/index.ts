@@ -33,12 +33,12 @@ serve(async (req) => {
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const { type, content, title } = await req.json();
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY não configurada");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY não configurada");
 
     // ==================== IMAGE GENERATION ====================
     if (type === "image") {
-      console.log("Generating image with google/gemini-3-pro-image-preview...");
+      console.log("Generating image with gemini-2.5-flash-image-preview...");
 
       // Limpar conteúdo: remover meta-frases sobre "sou uma IA", limites técnicos etc.
       const cleanContent = (content || "")
@@ -67,20 +67,17 @@ REGRAS DE TEXTO:
 
 Retorne APENAS a imagem da folha de atividade, sem qualquer texto explicativo.`;
 
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: visualPrompt }] }],
+            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+          }),
         },
-        body: JSON.stringify({
-          model: "google/gemini-3-pro-image-preview",
-          messages: [
-            { role: "user", content: visualPrompt },
-          ],
-          modalities: ["image", "text"],
-        }),
-      });
+      );
 
       if (!response.ok) {
         const t = await response.text();
@@ -90,8 +87,8 @@ Retorne APENAS a imagem da folha de atividade, sem qualquer texto explicativo.`;
             status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        if (response.status === 402) {
-          return new Response(JSON.stringify({ error: "Créditos insuficientes. Adicione créditos na sua conta." }), {
+        if (response.status === 402 || response.status === 403) {
+          return new Response(JSON.stringify({ error: "Créditos insuficientes ou chave inválida." }), {
             status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -99,77 +96,30 @@ Retorne APENAS a imagem da folha de atividade, sem qualquer texto explicativo.`;
       }
 
       const result = await response.json();
-      const message = result.choices?.[0]?.message;
-      console.log("Image response structure:", JSON.stringify({
-        hasImages: !!message?.images,
-        imagesLength: message?.images?.length,
-        contentType: typeof message?.content,
-        contentIsArray: Array.isArray(message?.content),
-      }));
+      const parts = result.candidates?.[0]?.content?.parts || [];
 
       let base64Data: string | null = null;
-
-      // Format 1: images array (most common for image models)
-      if (message?.images && Array.isArray(message.images)) {
-        for (const img of message.images) {
-          if (img.type === "image_url" && img.image_url?.url) {
-            base64Data = img.image_url.url;
-            break;
-          }
+      let mimeType = "image/png";
+      for (const part of parts) {
+        if (part.inlineData?.data) {
+          base64Data = part.inlineData.data;
+          mimeType = part.inlineData.mimeType || "image/png";
+          break;
         }
-      }
-
-      // Format 2: content as array of parts
-      if (!base64Data && Array.isArray(message?.content)) {
-        for (const part of message.content) {
-          if (part.type === "image_url" && part.image_url?.url) {
-            base64Data = part.image_url.url;
-            break;
-          }
-        }
-      }
-
-      // Format 3: content is string starting with data:image
-      if (!base64Data && typeof message?.content === "string" && message.content.startsWith("data:image")) {
-        base64Data = message.content;
       }
 
       if (!base64Data) {
-        console.error("No image data found. Message keys:", message ? Object.keys(message) : "null");
+        console.error("No image data in response:", JSON.stringify(result).slice(0, 500));
         return new Response(JSON.stringify({ error: "Não foi possível gerar a imagem. Tente descrever melhor o que deseja." }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Upload to storage
-      console.log("Got image data, uploading to storage...");
-      let bytes: Uint8Array;
-      let mimeType = "image/png";
-      let ext = "png";
-
-      if (base64Data.startsWith("data:image")) {
-        const match = base64Data.match(/^data:(image\/\w+);base64,(.+)$/s);
-        if (!match) throw new Error("Formato de imagem inválido");
-        mimeType = match[1];
-        ext = mimeType.split("/")[1] || "png";
-        const raw = match[2].replace(/\s/g, "");
-        const binaryStr = atob(raw);
-        bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      } else if (base64Data.startsWith("http")) {
-        // It's a URL — fetch and upload
-        const imgResp = await fetch(base64Data);
-        const blob = await imgResp.arrayBuffer();
-        bytes = new Uint8Array(blob);
-        mimeType = imgResp.headers.get("content-type") || "image/png";
-        ext = mimeType.split("/")[1]?.split(";")[0] || "png";
-      } else {
-        // Raw base64
-        const raw = base64Data.replace(/\s/g, "");
-        const binaryStr = atob(raw);
-        bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      }
+      const ext = mimeType.split("/")[1] || "png";
+      const raw = base64Data.replace(/\s/g, "");
+      const binaryStr = atob(raw);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
 
       const filePath = `generated/${user.id}/${Date.now()}.${ext}`;
       const { error: uploadError } = await supabaseAdmin.storage
@@ -178,13 +128,9 @@ Retorne APENAS a imagem da folha de atividade, sem qualquer texto explicativo.`;
 
       if (uploadError) {
         console.error("Upload error:", uploadError);
-        // Fallback: return base64 directly if it starts with data:
-        if (base64Data.startsWith("data:image")) {
-          return new Response(JSON.stringify({ url: base64Data, type: "image" }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        throw new Error("Erro ao salvar imagem");
+        return new Response(JSON.stringify({ url: `data:${mimeType};base64,${raw}`, type: "image" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       const { data: urlData } = supabaseAdmin.storage.from("attachments").getPublicUrl(filePath);
@@ -235,14 +181,14 @@ Conteúdo: ${cleanInput}
 
 Retorne APENAS o HTML completo, sem explicações, sem preâmbulo, sem markdown. Comece direto com <!DOCTYPE html>.`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "gemini-2.5-flash",
         messages: [
           { role: "system", content: "Você é um gerador de documentos HTML profissionais. Retorne APENAS código HTML válido, sem markdown, sem blocos de código, sem preâmbulo, sem mensagens de recusa, sem dizer que é uma IA. Use <div data-pdf-section=\"true\"> para separar seções. Para underscores de completar, use sequências contínuas SEM espaços entre os underscores." },
           { role: "user", content: docPrompt },
