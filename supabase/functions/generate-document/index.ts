@@ -38,7 +38,7 @@ serve(async (req) => {
 
     // ==================== IMAGE GENERATION ====================
     if (type === "image") {
-      console.log("Generating image with gemini-2.5-flash-image-preview...");
+      console.log("Generating image with gemini-2.0-flash-preview-image-generation...");
 
       // Limpar conteúdo: remover meta-frases sobre "sou uma IA", limites técnicos etc.
       const cleanContent = (content || "")
@@ -47,28 +47,22 @@ serve(async (req) => {
         .replace(/\s{2,}/g, " ")
         .trim();
 
-      const visualPrompt = `Gere UMA imagem que pareça uma FOLHA DE ATIVIDADE ESCOLAR IMPRESSA (worksheet pedagógico) — formato A4 retrato, fundo branco, com TEXTO LEGÍVEL em português brasileiro.
+      const visualPrompt = `Gere UMA ilustração educativa simples e limpa, em estilo desenho infantil amigável, fundo branco, sem texto.
 
-ESTILO OBRIGATÓRIO:
-- Aparência de papel de atividade impresso, NÃO uma ilustração, NÃO uma cena, NÃO uma foto, NÃO crianças/personagens.
-- Layout estruturado tipo worksheet: cabeçalho com "ATIVIDADE", linhas de "Nome:_____", "Professor(a):_____", "Data:____", e abaixo o conteúdo da atividade.
-- Use fontes claras (sans-serif tipo Arial), preto sobre branco, com bordas finas em caixas/quadros quando necessário.
-- Inclua os elementos típicos: enunciado da instrução, exercícios numerados, lacunas para preencher (linhas contínuas "_______"), quadros para resposta, círculos/balões para desenho se for o caso.
-- Pode usar ÍCONES PEQUENOS decorativos (ex: 📚 ✏️ 🏆) ao lado de títulos de seção, mas o foco é o TEXTO da atividade.
-- NÃO desenhe crianças, professores, salas de aula, fundos coloridos ou cenários — é uma FOLHA DE PAPEL.
+ESTILO:
+- Ilustração colorida, traço claro e limpo, estilo livro infantil ou material didático.
+- Fundo branco ou muito leve (não use cenários complexos).
+- Foco em UM elemento principal centralizado, fácil de identificar.
+- Sem texto, sem letras, sem números na imagem.
+- Apropriado pra crianças (sem violência, sem conteúdo adulto).
 
-CONTEÚDO DA ATIVIDADE A REPRESENTAR:
-${cleanContent || "Atividade de alfabetização com lacunas para completar palavras"}
+ASSUNTO DA ILUSTRAÇÃO:
+${cleanContent || "Uma maçã vermelha simples, em estilo desenho educativo"}
 
-REGRAS DE TEXTO:
-- Para palavras com letras a completar (ex: "BOLA" sem vogais), escreva exatamente "B_L_" — letras coladas, SEM espaços entre underscores.
-- Para lacunas de palavra inteira, use linha contínua: "____________".
-- Texto em português, ortografia correta, legível.
-
-Retorne APENAS a imagem da folha de atividade, sem qualquer texto explicativo.`;
+Retorne APENAS a imagem ilustrada, sem texto explicativo.`;
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${GEMINI_API_KEY}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -210,6 +204,21 @@ REGRAS ABSOLUTAS:
 4. Cada exercício DEVE estar em <div data-pdf-section="true"> separada — isso evita cortar exercício no meio na quebra de página.
 5. NÃO use cores muito saturadas, fundos muito chamativos, nem fontes decorativas. É uma folha de atividade — tem que ser limpa, clara e profissional.
 6. Use ÍCONES EMOJIS pequenos APENAS em títulos de seção (📚 ✏️ 📝 ✂️) — não exagera.
+7. PROIBIDO usar caixas/placeholders dizendo "IMAGEM:", "FOTO:", "IMG:" ou similar. Você NÃO consegue gerar imagens — não finja. Em vez de colocar caixa de imagem, use:
+   - O nome do objeto em negrito (ex: **bola de futebol**)
+   - Ou um emoji apropriado (⚽ 🏀 🎾 🐶 🌳 🍎 ✏️ 📚 etc.)
+   - Ou pede pro aluno DESENHAR (caixa com bordas tracejadas pro desenho dele)
+   Exemplo CERTO: "Circule a **bola de futebol** ⚽"
+   Exemplo ERRADO: caixa com texto "IMAGEM: Bola de Futebol"
+8. CSS DE QUEBRA DE PÁGINA: adicione no <style> do <head>:
+   <style>
+     @page { margin: 20mm; }
+     body { font-family: Helvetica, Arial, sans-serif; font-size: 12pt; line-height: 1.5; color: #1a1a1a; }
+     [data-pdf-section] { break-inside: avoid; page-break-inside: avoid; margin-bottom: 18px; }
+     h1, h2, h3 { break-after: avoid; page-break-after: avoid; }
+     p { orphans: 3; widows: 3; }
+   </style>
+   Esses CSS impedem que exercícios sejam cortados no meio entre páginas.
 
 CONTEÚDO DA ATIVIDADE:
 ${cleanInput}
