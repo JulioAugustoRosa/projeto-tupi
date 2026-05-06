@@ -17,7 +17,6 @@ serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     const supabaseAuth = createClient(supabaseUrl, supabaseAnon, {
@@ -30,107 +29,49 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Não autorizado" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const { type, content, title } = await req.json();
 
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY não configurada");
 
-    // ==================== IMAGE GENERATION ====================
+    // ==================== IMAGE GENERATION (via Pollinations.ai) ====================
     if (type === "image") {
-      console.log("Generating image with gemini-2.0-flash-preview-image-generation...");
-
-      // Limpar conteúdo: remover meta-frases sobre "sou uma IA", limites técnicos etc.
       const cleanContent = (content || "")
         .replace(/eu (sou|sou uma|, como)[^.!?\n]*(ia|inteligência artificial|modelo|baseada em texto|de linguagem)[^.!?\n]*[.!?]?/gi, "")
         .replace(/(não|nao) (posso|consigo) (gerar|criar|produzir)[^.!?\n]*[.!?]?/gi, "")
         .replace(/\s{2,}/g, " ")
         .trim();
 
-      const visualPrompt = `Gere UMA ilustração educativa simples e limpa, em estilo desenho infantil amigável, fundo branco, sem texto.
+      // Pollinations dá melhor resultado em inglês — Gemini traduz e reescreve como prompt visual
+      const translatePrompt = `Convert this Portuguese description into a short English image prompt (max 15 words) suitable for an educational illustration. Add "simple illustration, cartoon style, white background, clean lines, no text" at the end. Return ONLY the English prompt, no quotes, no explanation.
 
-ESTILO:
-- Ilustração colorida, traço claro e limpo, estilo livro infantil ou material didático.
-- Fundo branco ou muito leve (não use cenários complexos).
-- Foco em UM elemento principal centralizado, fácil de identificar.
-- Sem texto, sem letras, sem números na imagem.
-- Apropriado pra crianças (sem violência, sem conteúdo adulto).
+Description: ${cleanContent || "uma maçã vermelha"}`;
 
-ASSUNTO DA ILUSTRAÇÃO:
-${cleanContent || "Uma maçã vermelha simples, em estilo desenho educativo"}
-
-Retorne APENAS a imagem ilustrada, sem texto explicativo.`;
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${GEMINI_API_KEY}`,
-        {
+      let englishPrompt = `${cleanContent} simple illustration cartoon style white background no text`;
+      try {
+        const tr = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: visualPrompt }] }],
-            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+            model: "gemini-2.5-flash",
+            messages: [{ role: "user", content: translatePrompt }],
           }),
-        },
-      );
-
-      if (!response.ok) {
-        const t = await response.text();
-        console.error("Image gen error:", response.status, t);
-        if (response.status === 429) {
-          return new Response(JSON.stringify({ error: "Limite de requisições excedido. Tente novamente em alguns segundos." }), {
-            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        if (response.status === 402 || response.status === 403) {
-          return new Response(JSON.stringify({ error: "Créditos insuficientes ou chave inválida." }), {
-            status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        throw new Error("Erro ao gerar imagem");
-      }
-
-      const result = await response.json();
-      const parts = result.candidates?.[0]?.content?.parts || [];
-
-      let base64Data: string | null = null;
-      let mimeType = "image/png";
-      for (const part of parts) {
-        if (part.inlineData?.data) {
-          base64Data = part.inlineData.data;
-          mimeType = part.inlineData.mimeType || "image/png";
-          break;
-        }
-      }
-
-      if (!base64Data) {
-        console.error("No image data in response:", JSON.stringify(result).slice(0, 500));
-        return new Response(JSON.stringify({ error: "Não foi possível gerar a imagem. Tente descrever melhor o que deseja." }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+        if (tr.ok) {
+          const trJson = await tr.json();
+          const txt = trJson.choices?.[0]?.message?.content?.trim();
+          if (txt) englishPrompt = txt;
+        }
+      } catch (e) {
+        console.warn("Tradução do prompt falhou, usando fallback:", (e as Error).message);
       }
 
-      const ext = mimeType.split("/")[1] || "png";
-      const raw = base64Data.replace(/\s/g, "");
-      const binaryStr = atob(raw);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?width=512&height=512&nologo=true`;
+      console.log("Pollinations URL:", pollinationsUrl);
 
-      const filePath = `generated/${user.id}/${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from("attachments")
-        .upload(filePath, bytes, { contentType: mimeType, upsert: true });
-
-      if (uploadError) {
-        console.error("Upload error:", uploadError);
-        return new Response(JSON.stringify({ url: `data:${mimeType};base64,${raw}`, type: "image" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data: urlData } = supabaseAdmin.storage.from("attachments").getPublicUrl(filePath);
-      console.log("Image uploaded successfully:", urlData.publicUrl);
-
-      return new Response(JSON.stringify({ url: urlData.publicUrl, type: "image" }), {
+      // Pollinations gera a imagem on-demand quando o cliente acessa a URL.
+      // Não precisa fazer upload pro storage — a URL é estável e CORS-friendly.
+      return new Response(JSON.stringify({ url: pollinationsUrl, type: "image" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -204,12 +145,15 @@ REGRAS ABSOLUTAS:
 4. Cada exercício DEVE estar em <div data-pdf-section="true"> separada — isso evita cortar exercício no meio na quebra de página.
 5. NÃO use cores muito saturadas, fundos muito chamativos, nem fontes decorativas. É uma folha de atividade — tem que ser limpa, clara e profissional.
 6. Use ÍCONES EMOJIS pequenos APENAS em títulos de seção (📚 ✏️ 📝 ✂️) — não exagera.
-7. PROIBIDO usar caixas/placeholders dizendo "IMAGEM:", "FOTO:", "IMG:" ou similar. Você NÃO consegue gerar imagens — não finja. Em vez de colocar caixa de imagem, use:
-   - O nome do objeto em negrito (ex: **bola de futebol**)
-   - Ou um emoji apropriado (⚽ 🏀 🎾 🐶 🌳 🍎 ✏️ 📚 etc.)
-   - Ou pede pro aluno DESENHAR (caixa com bordas tracejadas pro desenho dele)
-   Exemplo CERTO: "Circule a **bola de futebol** ⚽"
-   Exemplo ERRADO: caixa com texto "IMAGEM: Bola de Futebol"
+7. IMAGENS: você PODE incluir imagens reais usando o serviço Pollinations.ai (gratuito, sem chave). Sintaxe:
+   <img src="https://image.pollinations.ai/prompt/DESCRICAO_EM_INGLES?width=400&height=400&nologo=true" alt="descrição em pt" style="display:block; margin: 8px auto; max-width: 200px; height: auto;" />
+   REGRAS pras imagens:
+   - DESCRICAO_EM_INGLES deve ser URL-encoded (espaços = %20). Exemplos: "soccer%20ball%20simple%20illustration", "cute%20cat%20cartoon", "red%20apple%20on%20white%20background".
+   - Sempre adicione "simple illustration" ou "cartoon style" ou "white background" no prompt pra ficar limpo.
+   - Use width/height entre 300-500. Pra ilustração principal, 400x400 é bom.
+   - Use NO MÁXIMO 2-3 imagens por exercício pra não pesar a página.
+   - PROIBIDO placeholders tipo "IMAGEM:", "FOTO:", "IMG:" ou caixas vazias. Sempre coloque a tag <img> de verdade com URL Pollinations.
+   Quando NÃO precisar de imagem (texto puro funciona melhor), use emojis: ⚽ 🏀 🎾 🐶 🌳 🍎 ✏️ 📚 etc.
 8. CSS DE QUEBRA DE PÁGINA: adicione no <style> do <head>:
    <style>
      @page { margin: 20mm; }
