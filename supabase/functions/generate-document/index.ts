@@ -34,7 +34,7 @@ serve(async (req) => {
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY não configurada");
 
-    // ==================== IMAGE GENERATION (via Pollinations.ai) ====================
+    // ==================== IMAGE GENERATION (via Gemini Nano Banana) ====================
     if (type === "image") {
       const cleanContent = (content || "")
         .replace(/eu (sou|sou uma|, como)[^.!?\n]*(ia|inteligência artificial|modelo|baseada em texto|de linguagem)[^.!?\n]*[.!?]?/gi, "")
@@ -42,36 +42,92 @@ serve(async (req) => {
         .replace(/\s{2,}/g, " ")
         .trim();
 
-      // Pollinations dá melhor resultado em inglês — Gemini traduz e reescreve como prompt visual
-      const translatePrompt = `Convert this Portuguese description into a short English image prompt (max 15 words) suitable for an educational illustration. Add "simple illustration, cartoon style, white background, clean lines, no text" at the end. Return ONLY the English prompt, no quotes, no explanation.
+      const visualPrompt = `Gere uma ilustração no estilo de atividade escolar de alfabetização impressa, em preto e branco.
 
-Description: ${cleanContent || "uma maçã vermelha"}`;
+ESTILO OBRIGATÓRIO:
+- Preto e branco, sem cores (apenas contornos pretos sobre fundo branco)
+- Estilo desenho para colorir / clip-art de material escolar
+- Linhas grossas, limpas, sem sombreamento
+- Fundo branco puro
+- Tipo material que professor distribui em sala de aula
+- Apropriado para criança em alfabetização
+- Centralizado, sem cenário ao redor
 
-      let englishPrompt = `${cleanContent} simple illustration cartoon style white background no text`;
-      try {
-        const tr = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "gemini-2.5-flash",
-            messages: [{ role: "user", content: translatePrompt }],
-          }),
-        });
-        if (tr.ok) {
-          const trJson = await tr.json();
-          const txt = trJson.choices?.[0]?.message?.content?.trim();
-          if (txt) englishPrompt = txt;
+ASSUNTO DA ILUSTRAÇÃO:
+${cleanContent || "uma bola simples"}
+
+Retorne APENAS a imagem, sem texto, sem letras, sem números na imagem.`;
+
+      // Lista de modelos pra tentar, em ordem de preferência (melhor free disponível primeiro)
+      const candidateModels = [
+        "gemini-2.5-flash-image",
+        "gemini-2.0-flash-preview-image-generation",
+      ];
+
+      let result: any = null;
+      let lastError = "";
+      for (const model of candidateModels) {
+        const resp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text: visualPrompt }] }],
+              generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+            }),
+          },
+        );
+
+        if (resp.ok) {
+          result = await resp.json();
+          console.log(`Imagem gerada com modelo: ${model}`);
+          break;
         }
-      } catch (e) {
-        console.warn("Tradução do prompt falhou, usando fallback:", (e as Error).message);
+
+        const errText = await resp.text();
+        lastError = `${model} → ${resp.status}: ${errText.slice(0, 200)}`;
+        console.warn(lastError);
+
+        // Se for rate limit, não adianta tentar outro modelo — falha logo
+        if (resp.status === 429) {
+          return new Response(
+            JSON.stringify({ error: "Limite diário de imagens do Gemini atingido. Tente novamente mais tarde." }),
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
       }
 
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?width=512&height=512&nologo=true`;
-      console.log("Pollinations URL:", pollinationsUrl);
+      if (!result) {
+        console.error("Todos os modelos de imagem falharam:", lastError);
+        return new Response(
+          JSON.stringify({ error: "Não foi possível gerar a imagem. Detalhes: " + lastError }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
 
-      // Pollinations gera a imagem on-demand quando o cliente acessa a URL.
-      // Não precisa fazer upload pro storage — a URL é estável e CORS-friendly.
-      return new Response(JSON.stringify({ url: pollinationsUrl, type: "image" }), {
+      const parts = result.candidates?.[0]?.content?.parts || [];
+      let base64Data: string | null = null;
+      let mimeType = "image/png";
+      for (const part of parts) {
+        if (part.inlineData?.data) {
+          base64Data = part.inlineData.data;
+          mimeType = part.inlineData.mimeType || "image/png";
+          break;
+        }
+      }
+
+      if (!base64Data) {
+        console.error("Nenhuma imagem na resposta:", JSON.stringify(result).slice(0, 500));
+        return new Response(
+          JSON.stringify({ error: "Não foi possível gerar a imagem. Tente descrever melhor." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Retorna como data URL — cliente usa direto em <img src={url}>
+      const dataUrl = `data:${mimeType};base64,${base64Data}`;
+      return new Response(JSON.stringify({ url: dataUrl, type: "image" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
