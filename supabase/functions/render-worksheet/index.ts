@@ -6,8 +6,10 @@ const corsHeaders = {
 };
 
 function pollinationsUrl(prompt: string, w = 400, h = 400): string {
-  const augmented = `${prompt}, simple line drawing, cartoon style, white background, no text, educational illustration for children`;
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(augmented)}?width=${w}&height=${h}&nologo=true`;
+  // Estilo "desenho pra colorir" típico de material escolar brasileiro:
+  // contorno preto, linhas grossas, sem sombreamento, fundo branco puro
+  const augmented = `${prompt}, black and white coloring book line art, thick clean outlines, no shading, no color fill, no text, no letters, white background, simple childrens worksheet illustration, hand drawn style`;
+  return `https://image.pollinations.ai/prompt/${encodeURIComponent(augmented)}?width=${w}&height=${h}&nologo=true&model=flux`;
 }
 
 function escapeHtml(s: string): string {
@@ -15,112 +17,118 @@ function escapeHtml(s: string): string {
 }
 
 const sharedCSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@500;700;900&family=Nunito:wght@600;800;900&display=swap');
   @page { size: A4; margin: 0; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   html, body { margin: 0; padding: 0; background: white; }
   body {
-    font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-    color: #1a1a1a;
-    padding: 8mm;
+    font-family: 'Lexend', 'Nunito', 'Helvetica Neue', sans-serif;
+    color: #000;
+    padding: 6mm;
   }
   .page {
     width: 100%;
-    border: 3px dashed #000;
-    border-radius: 14px;
-    padding: 8mm 10mm 14mm;
-    min-height: 277mm;
+    border: 4px dashed #000;
+    border-radius: 18px;
+    padding: 9mm 11mm 16mm;
+    min-height: 280mm;
     position: relative;
     page-break-after: always;
+    background: white;
   }
   .header {
-    border: 2px dashed #000;
+    border: 3px dashed #000;
     border-radius: 9999px;
-    padding: 4mm 8mm;
+    padding: 5mm 10mm;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 12pt;
-    margin-bottom: 6mm;
+    font-size: 13pt;
+    font-weight: 700;
+    margin-bottom: 8mm;
     background: white;
   }
   .header .field { display: flex; align-items: center; gap: 2mm; }
-  .header .line { display: inline-block; min-width: 50mm; border-bottom: 1px solid #000; height: 5mm; }
-  .header .small-line { display: inline-block; min-width: 7mm; border-bottom: 1px solid #000; height: 5mm; }
+  .header .line { display: inline-block; min-width: 60mm; border-bottom: 2px solid #000; height: 6mm; }
+  .header .small-line { display: inline-block; min-width: 8mm; border-bottom: 2px solid #000; height: 6mm; }
   .title-h1 {
     text-align: center;
-    font-size: 18pt;
+    font-size: 22pt;
     font-weight: 900;
-    margin: 0 0 4mm;
-    letter-spacing: 1px;
+    margin: 0 0 5mm;
+    letter-spacing: 2px;
+    text-transform: uppercase;
   }
   .section {
-    padding: 5mm 0 6mm;
-    border-bottom: 2px dashed #999;
+    padding: 6mm 0 8mm;
+    border-bottom: 3px dashed #555;
     page-break-inside: avoid;
   }
   .section:last-of-type { border-bottom: none; }
   .instruction {
-    font-size: 14pt;
-    font-style: italic;
-    margin-bottom: 4mm;
-    color: #1a1a1a;
+    font-size: 16pt;
+    font-weight: 700;
+    margin-bottom: 6mm;
+    color: #000;
   }
-  .row { display: flex; align-items: center; gap: 12mm; }
+  .row { display: flex; align-items: center; gap: 14mm; }
   .col-grow { flex: 1; min-width: 0; }
   .word-huge {
-    font-size: 56pt;
+    font-size: 80pt;
+    font-weight: 900;
+    letter-spacing: 6px;
+    line-height: 1.0;
+    font-family: 'Lexend', 'Helvetica', Arial, sans-serif;
+    color: #000;
+  }
+  .word-big {
+    font-size: 48pt;
     font-weight: 900;
     letter-spacing: 4px;
     line-height: 1.05;
-    font-family: 'Helvetica', Arial, sans-serif;
   }
-  .word-big {
-    font-size: 36pt;
-    font-weight: 900;
-    letter-spacing: 3px;
-    line-height: 1.1;
-  }
-  .word-med { font-size: 22pt; font-weight: 900; letter-spacing: 2px; }
+  .word-med { font-size: 28pt; font-weight: 900; letter-spacing: 3px; }
   .empty-box {
     display: inline-block;
-    border: 2.5px solid #000;
-    border-radius: 6px;
+    border: 3px solid #000;
+    border-radius: 10px;
     background: white;
     vertical-align: middle;
   }
-  .empty-box.lg { width: 36mm; height: 18mm; }
-  .empty-box.md { width: 24mm; height: 14mm; }
-  .empty-box.sm { width: 16mm; height: 10mm; }
+  .empty-box.lg { width: 44mm; height: 24mm; }
+  .empty-box.md { width: 30mm; height: 18mm; }
+  .empty-box.sm { width: 20mm; height: 12mm; }
   .illu { flex-shrink: 0; }
-  .illu.lg { width: 50mm; height: 50mm; }
-  .illu.md { width: 35mm; height: 35mm; }
+  .illu.lg { width: 60mm; height: 60mm; }
+  .illu.md { width: 42mm; height: 42mm; }
   .illu img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .copy-line {
-    border-bottom: 2px solid #888;
-    height: 11mm;
+    border-bottom: 2.5px solid #444;
+    height: 13mm;
     margin-bottom: 3mm;
   }
   .footer {
     position: absolute;
-    bottom: 4mm;
+    bottom: 5mm;
     left: 0;
     right: 0;
     text-align: center;
-    font-size: 8pt;
-    color: #888;
+    font-size: 9pt;
+    color: #777;
+    font-style: italic;
   }
   .num-circle {
     display: inline-block;
-    width: 9mm;
-    height: 9mm;
-    line-height: 9mm;
+    width: 11mm;
+    height: 11mm;
+    line-height: 11mm;
     border-radius: 50%;
-    background: #4F46E5;
+    background: #000;
     color: white;
     text-align: center;
     font-weight: 900;
-    font-size: 12pt;
-    margin-right: 3mm;
+    font-size: 14pt;
+    margin-right: 4mm;
     vertical-align: middle;
   }
 `;
