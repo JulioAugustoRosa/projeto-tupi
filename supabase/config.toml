@@ -1,4 +1,4 @@
-project_id = "wolpyiudmyiflqlgvlpu"
+project_id = "dmtbhodwjfxefhkpvzzo"
 
 [functions.chat]
 verify_jwt = false
@@ -8,3 +8,8 @@ verify_jwt = false
 
 [functions.adapt-activity]
 verify_jwt = false
+
+# Esta função gasta crédito pago (OpenRouter): o gateway já exige um JWT válido
+# antes de executar, e a função confere o usuário de novo com getUser().
+[functions.adapt-compare]
+verify_jwt = true

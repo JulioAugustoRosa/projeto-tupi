@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil } from "lucide-react";
+import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
@@ -19,15 +19,43 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface ResultadoModelo {
+  modelo: string;
+  nome: string;
+  conteudo?: string;
+  erro?: string;
+  ms: number;
+}
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Quando preenchido, a mensagem é uma comparação lado a lado entre modelos. */
+  comparacao?: ResultadoModelo[];
+  alunoNome?: string;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 const DOC_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-document`;
+const COMPARE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/adapt-compare`;
+
+/** Espelha a lista fixa validada no servidor (supabase/functions/adapt-compare). */
+const MODELOS = [
+  { id: "openai/gpt-5-nano", nome: "ChatGPT", detalhe: "GPT-5 Nano" },
+  { id: "google/gemini-2.5-flash-lite", nome: "Gemini", detalhe: "2.5 Flash Lite" },
+  { id: "anthropic/claude-haiku-5.5", nome: "Claude", detalhe: "Haiku 5.5" },
+] as const;
+
+const MAX_ARQUIVO_MB = 4;
 
 const WELCOME_MSG: Message = {
   id: "welcome",
@@ -75,6 +103,9 @@ const AssistentePage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<{ file: File; preview?: string }[]>([]);
+  // Modo adaptação: com um aluno selecionado, a mensagem vira uma comparação entre modelos.
+  const [alunoId, setAlunoId] = useState<string>("");
+  const [modelosSel, setModelosSel] = useState<string[]>(MODELOS.map((m) => m.id));
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -94,6 +125,21 @@ const AssistentePage = () => {
       return data ?? [];
     },
   });
+
+  // Alunos do professor, para o seletor do modo adaptação
+  const { data: alunos = [] } = useQuery({
+    queryKey: ["alunos-assistente", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("alunos")
+        .select("id, nome, turmas(nome)")
+        .order("nome");
+      return data ?? [];
+    },
+  });
+
+  const alunoSelecionado = alunos.find((a) => a.id === alunoId);
 
   // Mensagens da conversa selecionada
   const loadConversation = async (convId: string) => {
@@ -146,7 +192,138 @@ const AssistentePage = () => {
     return data.publicUrl;
   };
 
+  /** Lê o arquivo como base64 puro (sem o prefixo data:...;base64,). */
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const r = String(reader.result || "");
+        resolve(r.slice(r.indexOf(",") + 1));
+      };
+      reader.onerror = () => reject(new Error("Falha ao ler o arquivo"));
+      reader.readAsDataURL(file);
+    });
+
+  /**
+   * Modo adaptação: manda a atividade (texto e/ou arquivo) + o perfil do aluno
+   * para os modelos escolhidos e mostra as respostas lado a lado.
+   */
+  const handleAdaptCompare = async () => {
+    if (!user || !alunoId) return;
+    if (modelosSel.length === 0) {
+      toast({ title: "Escolha pelo menos um modelo", variant: "destructive" });
+      return;
+    }
+
+    const enunciado = input.trim();
+    const anexos = attachments.slice(0, 2);
+
+    if (!enunciado && anexos.length === 0) {
+      toast({ title: "Digite a atividade ou anexe um arquivo", variant: "destructive" });
+      return;
+    }
+
+    const invalido = anexos.find(
+      (a) => !(a.file.type.startsWith("image/") || a.file.type === "application/pdf"),
+    );
+    if (invalido) {
+      toast({
+        title: "Formato não aceito na adaptação",
+        description: `"${invalido.file.name}" — use imagem ou PDF.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const grande = anexos.find((a) => a.file.size > MAX_ARQUIVO_MB * 1_000_000);
+    if (grande) {
+      toast({
+        title: "Arquivo muito grande",
+        description: `"${grande.file.name}" passa de ${MAX_ARQUIVO_MB} MB.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const nomeAluno = alunoSelecionado?.nome ?? "aluno";
+    const resumoAnexos = anexos.length ? `\n\n📎 ${anexos.map((a) => a.file.name).join(", ")}` : "";
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: `🎯 **Adaptar para ${nomeAluno}**\n\n${enunciado || "(atividade no arquivo anexado)"}${resumoAnexos}`,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setAttachments([]);
+    setIsLoading(true);
+
+    try {
+      const arquivos = await Promise.all(
+        anexos.map(async (a) => ({
+          nome: a.file.name,
+          mime: a.file.type,
+          data: await fileToBase64(a.file),
+        })),
+      );
+
+      const convId = await getOrCreateConversation(`Adaptação — ${nomeAluno}`);
+      await supabase.from("chat_messages").insert({
+        conversation_id: convId, role: "user", content: userMsg.content,
+      });
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const resp = await fetch(COMPARE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionData?.session?.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({
+          aluno_id: alunoId,
+          texto: enunciado,
+          arquivos,
+          modelos: modelosSel,
+        }),
+      });
+
+      const result = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
+
+      const resultados: ResultadoModelo[] = result.resultados ?? [];
+      const compMsg: Message = {
+        id: "comp-" + Date.now(),
+        role: "assistant",
+        content: `Adaptação para **${result.aluno ?? nomeAluno}** — ${resultados.length} modelo(s).`,
+        comparacao: resultados,
+        alunoNome: result.aluno ?? nomeAluno,
+      };
+      setMessages((prev) => [...prev, compMsg]);
+
+      // Guarda em texto para a conversa continuar legível ao recarregar.
+      const registro = resultados
+        .map((r) => `### ${r.nome}\n\n${r.conteudo ?? `_${r.erro}_`}`)
+        .join("\n\n---\n\n");
+      await supabase.from("chat_messages").insert({
+        conversation_id: convId,
+        role: "assistant",
+        content: `**Comparação de adaptações — ${result.aluno ?? nomeAluno}**\n\n${registro}`,
+      });
+      await supabase.from("chat_conversations")
+        .update({ updated_at: new Date().toISOString() }).eq("id", convId);
+    } catch (e) {
+      toast({
+        title: "Erro ao gerar as adaptações",
+        description: (e as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSend = async () => {
+    // Com um aluno selecionado, a barra entra no modo adaptação comparada.
+    if (alunoId) return handleAdaptCompare();
     if ((!input.trim() && attachments.length === 0) || isLoading || !user) return;
 
     let userContent = input.trim();
@@ -586,7 +763,68 @@ const AssistentePage = () => {
                   <Bot className="h-4 w-4 text-primary-foreground" />
                 </div>
               )}
-              <div className="flex flex-col items-start gap-1 max-w-[75%]">
+              <div className={`flex flex-col items-start gap-1 ${msg.comparacao ? "w-full max-w-none" : "max-w-[75%]"}`}>
+                {msg.comparacao ? (
+                  /* Comparação lado a lado entre os modelos */
+                  <div className="w-full">
+                    <div className="flex items-center gap-2 mb-3 text-sm">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      <span className="font-display font-semibold text-foreground">
+                        Adaptação para {msg.alunoNome}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        · {msg.comparacao.length} modelo(s) comparado(s)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      {msg.comparacao.map((r) => (
+                        <div key={r.modelo} className="surface-card border border-border rounded-2xl flex flex-col overflow-hidden">
+                          <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-border bg-muted/40">
+                            <span className="font-display font-semibold text-sm text-foreground">{r.nome}</span>
+                            <span className="text-[11px] text-muted-foreground tabular-nums">
+                              {(r.ms / 1000).toFixed(1)}s
+                            </span>
+                          </div>
+                          <div className="px-4 py-3 text-sm leading-relaxed max-h-[32rem] overflow-y-auto">
+                            {r.erro ? (
+                              <div className="flex items-start gap-2 text-destructive text-xs">
+                                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                                <span>{r.erro}</span>
+                              </div>
+                            ) : (
+                              <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-sm prose-a:text-primary">
+                                <ReactMarkdown>{stripPreamble(r.conteudo ?? "")}</ReactMarkdown>
+                              </div>
+                            )}
+                          </div>
+                          {!r.erro && (
+                            <div className="px-4 py-2 border-t border-border">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground w-full justify-start"
+                                disabled={generatingId?.startsWith(msg.id + r.modelo)}
+                                onClick={() =>
+                                  handleExportFor(
+                                    { id: msg.id + r.modelo, role: "assistant", content: r.conteudo ?? "" },
+                                    "pdf",
+                                  )
+                                }
+                              >
+                                {generatingId?.startsWith(msg.id + r.modelo) ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                ) : (
+                                  <span className="mr-1">📄</span>
+                                )}
+                                Salvar esta versão em PDF
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
                 <div
                   className={`rounded-2xl px-4 py-3 text-sm leading-relaxed w-full ${
                     msg.role === "user"
@@ -610,8 +848,9 @@ const AssistentePage = () => {
                     <span className="whitespace-pre-wrap">{msg.content}</span>
                   )}
                 </div>
-                {/* Ações por mensagem (apenas assistant, exceto welcome) */}
-                {msg.role === "assistant" && msg.id !== "welcome" && (
+                )}
+                {/* Ações por mensagem (apenas assistant, exceto welcome e comparações) */}
+                {msg.role === "assistant" && msg.id !== "welcome" && !msg.comparacao && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -699,6 +938,73 @@ const AssistentePage = () => {
               ))}
             </div>
           )}
+          {/* Barra de modo: aluno + modelos */}
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <Select value={alunoId || "nenhum"} onValueChange={(v) => setAlunoId(v === "nenhum" ? "" : v)}>
+              <SelectTrigger className="h-9 w-auto min-w-[15rem] gap-2 text-sm" aria-label="Adaptar para um aluno">
+                <GraduationCap className="h-4 w-4 text-muted-foreground shrink-0" />
+                <SelectValue placeholder="Conversa normal" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="nenhum">Conversa normal (sem aluno)</SelectItem>
+                {alunos.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    Adaptar para {a.nome}
+                    {(a.turmas as { nome?: string } | null)?.nome ? ` · ${(a.turmas as { nome: string }).nome}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {alunoId && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 gap-2 text-sm">
+                    <Cpu className="h-4 w-4 text-muted-foreground" />
+                    {modelosSel.length === MODELOS.length
+                      ? "Os 3 modelos"
+                      : modelosSel.length === 1
+                      ? MODELOS.find((m) => m.id === modelosSel[0])?.nome
+                      : `${modelosSel.length} modelos`}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-56">
+                  {MODELOS.map((m) => {
+                    const ativo = modelosSel.includes(m.id);
+                    return (
+                      <DropdownMenuItem
+                        key={m.id}
+                        onSelect={(e) => {
+                          e.preventDefault();
+                          setModelosSel((prev) =>
+                            prev.includes(m.id) ? prev.filter((x) => x !== m.id) : [...prev, m.id],
+                          );
+                        }}
+                        className="gap-2"
+                      >
+                        <span className="w-4 shrink-0">
+                          {ativo && <Check className="h-4 w-4 text-primary" />}
+                        </span>
+                        <span className="flex-1">{m.nome}</span>
+                        <span className="text-[11px] text-muted-foreground">{m.detalhe}</span>
+                      </DropdownMenuItem>
+                    );
+                  })}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setModelosSel(MODELOS.map((m) => m.id))}>
+                    Selecionar os 3
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {alunoId && (
+              <span className="text-xs text-muted-foreground">
+                Anexe imagem ou PDF da atividade, ou digite o enunciado.
+              </span>
+            )}
+          </div>
+
           <div className="flex gap-3">
             <input
               ref={fileInputRef}
@@ -712,7 +1018,11 @@ const AssistentePage = () => {
               <Paperclip className="h-4 w-4" />
             </Button>
             <Textarea
-              placeholder="Peça para criar atividades, atualizar perfis, gerar conteúdo..."
+              placeholder={
+                alunoId
+                  ? `Enunciado da atividade para adaptar para ${alunoSelecionado?.nome ?? "o aluno"}...`
+                  : "Peça para criar atividades, atualizar perfis, gerar conteúdo..."
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
