@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
+import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
@@ -104,6 +104,7 @@ const AssistentePage = () => {
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<{ file: File; preview?: string }[]>([]);
   // Modo adaptação: com um aluno selecionado, a mensagem vira uma comparação entre modelos.
+  const [exportandoTudo, setExportandoTudo] = useState(false);
   const [alunoId, setAlunoId] = useState<string>("");
   const [modelosSel, setModelosSel] = useState<string[]>(MODELOS.map((m) => m.id));
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -676,6 +677,141 @@ const AssistentePage = () => {
     setMessages([WELCOME_MSG]);
   };
 
+  // ---------------------------------------------------------------------
+  // Exportação de conversas
+  // ---------------------------------------------------------------------
+
+  /** Nome de arquivo seguro, sem acento nem caractere especial. */
+  const slug = (s: string) =>
+    (s || "conversa")
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase()
+      .slice(0, 50) || "conversa";
+
+  const carregarMensagens = async (convId: string) => {
+    const { data } = await supabase
+      .from("chat_messages")
+      .select("role, content, created_at")
+      .eq("conversation_id", convId)
+      .order("created_at");
+    return data ?? [];
+  };
+
+  const conversaParaMarkdown = (
+    titulo: string,
+    criadaEm: string | null,
+    msgs: { role: string; content: string; created_at: string }[],
+  ) => {
+    const cab = [
+      `# ${titulo}`,
+      "",
+      `- Professor: ${user?.email ?? ""}`,
+      criadaEm ? `- Última atualização: ${new Date(criadaEm).toLocaleString("pt-BR")}` : "",
+      `- Mensagens: ${msgs.length}`,
+      `- Exportado em: ${new Date().toLocaleString("pt-BR")}`,
+      "",
+      "---",
+      "",
+    ].filter(Boolean).join("\n");
+
+    const corpo = msgs.map((m) => {
+      const quem = m.role === "user" ? "👤 Professor" : "🤖 Assistente";
+      const quando = new Date(m.created_at).toLocaleString("pt-BR");
+      return `## ${quem} · ${quando}\n\n${m.content}\n`;
+    }).join("\n---\n\n");
+
+    return cab + corpo;
+  };
+
+  /** Exporta UMA conversa em .md (leitura) ou .json (análise). */
+  const exportarConversa = async (
+    conv: { id: string; titulo: string; updated_at: string },
+    formato: "md" | "json",
+  ) => {
+    try {
+      const msgs = await carregarMensagens(conv.id);
+      if (msgs.length === 0) {
+        toast({ title: "Conversa vazia", description: "Não há mensagens para exportar." });
+        return;
+      }
+      if (formato === "md") {
+        const md = conversaParaMarkdown(conv.titulo, conv.updated_at, msgs);
+        downloadBlob(new Blob([md], { type: "text/markdown;charset=utf-8" }), `${slug(conv.titulo)}.md`);
+      } else {
+        const payload = {
+          titulo: conv.titulo,
+          professor: user?.email ?? null,
+          atualizado_em: conv.updated_at,
+          exportado_em: new Date().toISOString(),
+          mensagens: msgs,
+        };
+        downloadBlob(
+          new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }),
+          `${slug(conv.titulo)}.json`,
+        );
+      }
+      toast({ title: "Conversa exportada" });
+    } catch (e) {
+      toast({ title: "Erro ao exportar", description: (e as Error).message, variant: "destructive" });
+    }
+  };
+
+  /** Exporta TODAS as conversas num arquivo só — base para analisar as requisições depois. */
+  const exportarTudo = async (formato: "md" | "json") => {
+    if (conversations.length === 0) {
+      toast({ title: "Nenhuma conversa para exportar" });
+      return;
+    }
+    setExportandoTudo(true);
+    try {
+      const tudo = await Promise.all(
+        conversations.map(async (c) => ({ conv: c, msgs: await carregarMensagens(c.id) })),
+      );
+      const totalMsgs = tudo.reduce((n, t) => n + t.msgs.length, 0);
+      const data = new Date().toISOString().slice(0, 10);
+
+      if (formato === "md") {
+        const partes = [
+          `# Conversas do Assistente TUPI`,
+          "",
+          `- Professor: ${user?.email ?? ""}`,
+          `- Conversas: ${tudo.length}`,
+          `- Mensagens: ${totalMsgs}`,
+          `- Exportado em: ${new Date().toLocaleString("pt-BR")}`,
+          "",
+          "=".repeat(60),
+          "",
+          ...tudo.map(({ conv, msgs }) => conversaParaMarkdown(conv.titulo, conv.updated_at, msgs)),
+        ].join("\n");
+        downloadBlob(new Blob([partes], { type: "text/markdown;charset=utf-8" }), `tupi-conversas-${data}.md`);
+      } else {
+        const payload = {
+          professor: user?.email ?? null,
+          exportado_em: new Date().toISOString(),
+          total_conversas: tudo.length,
+          total_mensagens: totalMsgs,
+          conversas: tudo.map(({ conv, msgs }) => ({
+            id: conv.id,
+            titulo: conv.titulo,
+            atualizado_em: conv.updated_at,
+            mensagens: msgs,
+          })),
+        };
+        downloadBlob(
+          new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" }),
+          `tupi-conversas-${data}.json`,
+        );
+      }
+      toast({ title: `${tudo.length} conversa(s) exportada(s)`, description: `${totalMsgs} mensagens.` });
+    } catch (e) {
+      toast({ title: "Erro ao exportar", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setExportandoTudo(false);
+    }
+  };
+
   const deleteConversation = async (id: string) => {
     await supabase.from("chat_messages").delete().eq("conversation_id", id);
     await supabase.from("chat_conversations").delete().eq("id", id);
@@ -696,9 +832,29 @@ const AssistentePage = () => {
     <div className="flex h-[calc(100vh-8rem)] gap-4">
       {/* Sidebar de conversas */}
       <aside className="hidden md:flex w-64 shrink-0 flex-col surface-card p-3">
-        <Button onClick={newConversation} className="w-full mb-3" size="sm">
+        <Button onClick={newConversation} className="w-full mb-2" size="sm">
           <Plus className="h-4 w-4 mr-1" /> Nova Conversa
         </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="w-full mb-3" disabled={exportandoTudo || conversations.length === 0}>
+              {exportandoTudo ? (
+                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-1" />
+              )}
+              Exportar tudo
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-52">
+            <DropdownMenuItem onClick={() => exportarTudo("md")}>
+              📄 Markdown (.md) — leitura
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => exportarTudo("json")}>
+              🗂️ JSON (.json) — análise
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="flex-1 overflow-y-auto space-y-1">
           {conversations.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-6">Nenhuma conversa ainda.</p>
@@ -732,6 +888,13 @@ const AssistentePage = () => {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); exportarConversa(c, "md"); }}>
+                    <Download className="h-3.5 w-3.5 mr-2" /> Exportar (.md)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); exportarConversa(c, "json"); }}>
+                    <Download className="h-3.5 w-3.5 mr-2" /> Exportar (.json)
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setRenamingId(c.id); setRenameValue(c.titulo); }}>
                     <Pencil className="h-3.5 w-3.5 mr-2" /> Renomear
                   </DropdownMenuItem>
