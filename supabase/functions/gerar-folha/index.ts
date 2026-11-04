@@ -62,7 +62,7 @@ const ESQUEMA = `{
           "enunciado": "texto do exercício",
           "formato": "linhas | caixa | multipla | completar | ligar | desenho",
           "opcoes": ["só para multipla"],
-          "pares": [{"esquerda":"...","direita":"..."}],
+          "pares": [{"esquerda":"PALAVRA","imagem_prompt":"descrição em português da figura deste par"}],
           "linhas": 3,
           "imagem_prompt": "descrição EM INGLÊS da ilustração, ou vazio"
         }
@@ -159,6 +159,20 @@ O QUE NÃO É EXERCÍCIO (erros comuns, evite):
 - Itens repetidos do MESMO comando viram UM bloco só, com a lista dentro. Se a atividade
   pede para formar BOLA, GOL e TIME a partir das sílabas, isso é um bloco com três itens,
   não três blocos nem três páginas.
+
+EXERCÍCIO DE LIGAR — REGRAS RÍGIDAS:
+- Use "formato":"ligar" SOMENTE com 3 ou 4 pares. Ligar uma coisa a uma coisa só não é
+  exercício: se houver apenas uma palavra e uma figura, use "circular" ou "pintar".
+- Cada par tem "esquerda" (a PALAVRA, em caixa alta) e "imagem_prompt" (a figura que
+  vai do lado direito). Deixe "direita" vazio quando houver figura.
+- EMBARALHE: a ordem das figuras não pode ser a mesma das palavras, senão basta ligar
+  na horizontal sem ler.
+- Um bloco "ligar" não usa o "imagem_prompt" do bloco; as figuras ficam nos pares.
+
+NUNCA PEÇA FIGURA DE LETRA OU SÍLABA:
+"imagem_prompt" é sempre um OBJETO CONCRETO (gato, casa, bola). Não peça desenho de
+letras, sílabas ou palavras escritas — o desenho sai ilegível e o estilo proíbe texto.
+Para trabalhar a sílaba, escreva-a no enunciado e ilustre com o objeto correspondente.
 
 CADA BLOCO PRECISA TER ONDE RESPONDER:
 Nunca produza um bloco que seja só uma frase solta. Se o aluno tem que escrever algo,
@@ -481,6 +495,9 @@ serve(async (req) => {
       // que veio da adaptação, que conhece o perfil; e, na falta dela, uma derivada
       // do próprio enunciado, que ao menos fala do que o exercício trata.
       blocos.forEach((b, i) => {
+        const temPares = Array.isArray((b as { pares?: unknown[] }).pares) &&
+          ((b as { pares: unknown[] }).pares.length > 0);
+        if (temPares) { delete b.imagem_prompt; return; }
         if (i < descImagens.length) {
           b.imagem_prompt = descImagens[i];
         } else {
@@ -513,6 +530,14 @@ serve(async (req) => {
       const alvos: { imagem_prompt?: string; imagem?: string }[] = [];
       for (const pag of paginas) {
         for (const b of pag.blocos ?? []) {
+          // Num bloco "ligar", as figuras ficam nos pares, não no bloco.
+          const pares = (b as { pares?: { imagem_prompt?: string; imagem?: string }[] }).pares;
+          if (Array.isArray(pares) && pares.length > 0) {
+            for (const par of pares) {
+              if (par?.imagem_prompt && alvos.length < MAX_IMAGENS) alvos.push(par);
+            }
+            continue;
+          }
           if (b.imagem_prompt && alvos.length < MAX_IMAGENS) alvos.push(b);
         }
       }

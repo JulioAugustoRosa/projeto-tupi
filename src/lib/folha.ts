@@ -12,7 +12,11 @@ export interface BlocoFolha {
   enunciado: string;
   formato?: "linhas" | "caixa" | "multipla" | "completar" | "ligar" | "desenho";
   opcoes?: string[];
-  pares?: { esquerda: string; direita: string }[];
+  /**
+   * Pares do exercício de ligar. `direita` pode ser texto ou, quando o par tem
+   * `imagem`, a figura que fica do lado direito para o aluno conectar.
+   */
+  pares?: { esquerda: string; direita?: string; imagem?: string }[];
   linhas?: number;
   /** data: URL em base64, já embutida pela edge function */
   imagem?: string;
@@ -96,12 +100,31 @@ function blocoHtml(b: BlocoFolha, pt: number): string {
         ).join("")
       }</div>`;
       break;
-    case "ligar":
-      resposta = `<div style="display:flex;justify-content:space-between;gap:40px;margin-top:12px;">
-        <div style="display:flex;flex-direction:column;gap:${pt * 1.4}px;">${(b.pares ?? []).map((p) => `<span>${esc(p.esquerda)} &nbsp;•</span>`).join("")}</div>
-        <div style="display:flex;flex-direction:column;gap:${pt * 1.4}px;text-align:right;">${(b.pares ?? []).map((p) => `<span>•&nbsp; ${esc(p.direita)}</span>`).join("")}</div>
+    case "ligar": {
+      const pares = (b.pares ?? []).filter((p) => p?.esquerda);
+      // Um par sozinho não é exercício de ligar, e um lado direito vazio deixava
+      // a folha com um ponto solto sem nada para conectar. Nesses casos vira
+      // linha de resposta, que ao menos é utilizável.
+      const utilizavel = pares.length >= 2 && pares.some((p) => p.imagem || p.direita);
+      if (!utilizavel) {
+        resposta = `<div style="margin-top:10px;"><div style="border-bottom:1.5px solid #333;height:${pt * 2.4}px;"></div></div>`;
+        break;
+      }
+      const ponto = `<span style="display:inline-block;width:9px;height:9px;border:2px solid #333;border-radius:999px;flex:none;"></span>`;
+      const ladoDireito = (p: { direita?: string; imagem?: string }) =>
+        p.imagem
+          ? `<img src="${p.imagem}" alt="" style="width:${pt * 7}px;height:${pt * 7}px;object-fit:contain;" />`
+          : `<span>${esc(p.direita ?? "")}</span>`;
+      resposta = `<div style="display:flex;justify-content:space-between;align-items:stretch;gap:${pt * 3}px;margin-top:14px;">
+        <div style="display:flex;flex-direction:column;justify-content:space-around;gap:${pt * 1.6}px;">
+          ${pares.map((p) => `<div style="display:flex;align-items:center;gap:10px;font-weight:700;">${esc(p.esquerda)}${ponto}</div>`).join("")}
+        </div>
+        <div style="display:flex;flex-direction:column;justify-content:space-around;gap:${pt * 1.6}px;">
+          ${pares.map((p) => `<div style="display:flex;align-items:center;gap:10px;">${ponto}${ladoDireito(p)}</div>`).join("")}
+        </div>
       </div>`;
       break;
+    }
     case "desenho":
       resposta = `<div style="border:2px dashed #999;border-radius:8px;height:${Math.max(160, linhas * pt * 4)}px;margin-top:10px;"></div>`;
       break;
@@ -389,12 +412,66 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
             spacing: { after: 90, line: linhaEspaco },
           })));
           break;
-        case "ligar":
-          (b.pares ?? []).forEach((p) => filhos.push(new Paragraph({
-            children: [new TextRun({ text: `${p.esquerda}   •                    •   ${p.direita}`, size: half, font: fonte })],
-            spacing: { after: 130, line: linhaEspaco },
-          })));
+        case "ligar": {
+          const pares = (b.pares ?? []).filter((p) => p?.esquerda);
+          const utilizavel = pares.length >= 2 && pares.some((p) => p.imagem || p.direita);
+          if (!utilizavel) {
+            filhos.push(new Paragraph({
+              children: [new TextRun({ text: " ", size: half, font: fonte })],
+              border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 10 } },
+              spacing: { after: 200, line: linhaEspaco },
+            }));
+            break;
+          }
+          // Tabela de 3 colunas: palavra | pontos para ligar | figura
+          filhos.push(new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: {
+              top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+            },
+            rows: pares.map((p) => new TableRow({
+              children: [
+                new TableCell({
+                  verticalAlign: VerticalAlign.CENTER,
+                  children: [new Paragraph({
+                    children: [new TextRun({ text: `${p.esquerda}  •`, bold: true, size: half, font: fonte })],
+                  })],
+                }),
+                // O ponto fica na coluna do meio, centralizado verticalmente:
+                // junto da imagem ele caía na linha de base, bem abaixo da figura.
+                new TableCell({
+                  verticalAlign: VerticalAlign.CENTER,
+                  children: [new Paragraph({
+                    alignment: AlignmentType.RIGHT,
+                    children: [new TextRun({ text: "•", size: half, font: fonte })],
+                  })],
+                }),
+                new TableCell({
+                  verticalAlign: VerticalAlign.CENTER,
+                  children: [p.imagem
+                    ? new Paragraph({
+                        children: [new ImageRun({
+                          data: dataUrlParaBytes(p.imagem),
+                          type: tipoImagem(p.imagem),
+                          transformation: { width: 110, height: 110 },
+                        })],
+                      })
+                    : new Paragraph({
+                        children: [new TextRun({ text: p.direita ?? "", size: half, font: fonte })],
+                      }),
+                  ],
+                }),
+              ],
+            })),
+          }));
+          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
           break;
+        }
         case "desenho":
           // ~7cm de altura para o aluno desenhar
           filhos.push(caixaResposta(4000, true));
