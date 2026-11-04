@@ -12,17 +12,22 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 // `reasoning` é essencial aqui: gpt-5-nano tem raciocínio OBRIGATÓRIO e o
 // claude-haiku-5.5 usa esforço "medium" por padrão. Sem baixar o esforço, os
 // dois consomem todo o max_tokens pensando e devolvem conteúdo vazio.
+// Três degraus da mesma família GPT-5, do mais barato ao mais capaz, para
+// comparar qualidade contra custo na mesma tarefa.
+// Os três têm raciocínio OBRIGATÓRIO; nos menores ele é mantido no mínimo para
+// não consumir o orçamento de tokens antes de escrever a resposta.
 const MODELOS_PERMITIDOS: Record<string, { nome: string; reasoning?: Record<string, unknown> }> = {
   "openai/gpt-5-nano": {
-    nome: "ChatGPT (GPT-5 Nano)",
-    reasoning: { effort: "minimal" }, // obrigatório: só dá pra reduzir ao mínimo
+    nome: "GPT-5 Nano",
+    reasoning: { effort: "minimal" },
   },
-  "google/gemini-2.5-flash-lite": {
-    nome: "Gemini 2.5 Flash Lite",
+  "openai/gpt-5-mini": {
+    nome: "GPT-5 Mini",
+    reasoning: { effort: "low" },
   },
-  "anthropic/claude-haiku-5.5": {
-    nome: "Claude Haiku 5.5",
-    reasoning: { effort: "none" },
+  "openai/gpt-5": {
+    nome: "GPT-5",
+    reasoning: { effort: "medium" },
   },
 };
 
@@ -34,7 +39,7 @@ const MAX_ARQUIVOS = 2;
 // ~700 palavras pedidas no prompt. É um teto, não consumo garantido.
 const MAX_TOKENS = 5000;  // a atividade do aluno não tem limite: precisa caber
 const LIMITE_DIARIO = 60;        // chamadas por professor por dia
-const TIMEOUT_MS = 45_000;
+const TIMEOUT_MS = 90_000;  // o GPT-5 com reasoning medium chega perto de 45s
 
 // CORS restrito à origem do app (nada de "*").
 const ORIGENS_PERMITIDAS = [

@@ -154,6 +154,19 @@ O QUE NÃO É EXERCÍCIO (erros comuns, evite):
 - Um exemplo resolvido que o texto traz ("Exemplo: BO - LA") entra dentro do enunciado
   do primeiro exercício, não vira bloco separado.
 - Não quebre um exercício em vários blocos. Uma pergunta com itens a, b, c é UM bloco.
+- Itens repetidos do MESMO comando viram UM bloco só, com a lista dentro. Se a atividade
+  pede para formar BOLA, GOL e TIME a partir das sílabas, isso é um bloco com três itens,
+  não três blocos nem três páginas.
+
+CADA BLOCO PRECISA TER ONDE RESPONDER:
+Nunca produza um bloco que seja só uma frase solta. Se o aluno tem que escrever algo,
+o bloco precisa de "formato" e, no caso de "completar", de lacunas visíveis no próprio
+enunciado (underscores). "Forme a palavra com BO - LA" sem lacuna nenhuma é uma folha
+onde o aluno não tem onde escrever.
+
+SEPARAÇÃO SILÁBICA — SÓ SE ESTIVER CERTA:
+Não invente divisões. Palavras de uma sílaba só (GOL, PÃO, SOL, MAR) NÃO se separam:
+"GO - L" está errado. Na dúvida, não separe e use outro tipo de exercício.
 
 ${conteudo}
 
@@ -377,6 +390,19 @@ serve(async (req) => {
         const cfg = (folha.config ?? {}) as Record<string, unknown>;
         cfg.itens_por_pagina = porPagina;
         folha.config = cfg;
+      }
+    }
+
+    // Renumeração sequencial em toda a folha. O modelo costuma reiniciar a
+    // contagem a cada página ou repetir o mesmo número, e o renderizador tira a
+    // numeração que vem dentro do enunciado para não duplicar — então o número
+    // correto tem que sair daqui.
+    {
+      let n = 0;
+      for (const p of ((folha.paginas ?? []) as PaginaBruta[])) {
+        for (const b of (p.blocos ?? []) as { numero?: number }[]) {
+          b.numero = ++n;
+        }
       }
     }
 

@@ -61,6 +61,22 @@ function pilhaFonte(fonte?: string) {
 // HTML — usado no preview, no PDF e no PNG
 // ---------------------------------------------------------------------------
 
+/** O enunciado já traz as lacunas de resposta? Então não repetir linha embaixo. */
+const temLacuna = (txt: string) => /_{3,}/.test(txt || "");
+
+/**
+ * Limpa o que o modelo deixa passar no enunciado:
+ * - numeração própria ("1) ", "2. "), que duplicaria a bolinha do renderizador;
+ * - marcadores de figura em texto ("[desenho de uma bola]"), que deveriam ter
+ *   virado imagem e, quando não viram, não podem aparecer para o aluno.
+ */
+function limparEnunciado(txt: string, temNumero: boolean): string {
+  let t = txt || "";
+  if (temNumero) t = t.replace(/^\s*\d+\s*[).\-–]\s*/, "");
+  t = t.replace(/\[\s*(?:desenho|imagem|figura|foto)\s+(?:de|da|do|dos|das)?\s*[^\]]*\]/gi, "");
+  return t.replace(/[ \t]{2,}/g, " ").trim();
+}
+
 function blocoHtml(b: BlocoFolha, pt: number): string {
   const num = b.numero != null
     ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:${pt * 2}px;height:${pt * 2}px;border-radius:999px;background:#E95A3A;color:#fff;font-weight:700;margin-right:10px;flex:none;">${esc(b.numero)}</span>`
@@ -90,14 +106,26 @@ function blocoHtml(b: BlocoFolha, pt: number): string {
       resposta = `<div style="border:2px dashed #999;border-radius:8px;height:${Math.max(160, linhas * pt * 4)}px;margin-top:10px;"></div>`;
       break;
     case "completar":
-      resposta = "";
+      // Quando o enunciado já traz as lacunas ("b_l_"), o espaço de resposta é
+      // o próprio underscore. Mas se o modelo escreve só a instrução ("forme a
+      // palavra com BO - LA"), sem lacuna, a folha sairia sem lugar nenhum para
+      // o aluno escrever — então damos a linha.
+      resposta = temLacuna(b.enunciado)
+        ? ""
+        : `<div style="margin-top:10px;">${
+            Array.from({ length: linhas }).map(() =>
+              `<div style="border-bottom:1.5px solid #333;height:${pt * 2.4}px;"></div>`,
+            ).join("")
+          }</div>`;
       break;
     default:
-      resposta = `<div style="margin-top:10px;">${
-        Array.from({ length: linhas }).map(() =>
-          `<div style="border-bottom:1.5px solid #333;height:${pt * 2.2}px;"></div>`,
-        ).join("")
-      }</div>`;
+      resposta = temLacuna(b.enunciado)
+        ? ""
+        : `<div style="margin-top:10px;">${
+            Array.from({ length: linhas }).map(() =>
+              `<div style="border-bottom:1.5px solid #333;height:${pt * 2.2}px;"></div>`,
+            ).join("")
+          }</div>`;
   }
 
   const img = b.imagem
@@ -105,7 +133,7 @@ function blocoHtml(b: BlocoFolha, pt: number): string {
     : "";
 
   return `<div style="margin-bottom:${pt * 2}px;break-inside:avoid;">
-    <div style="display:flex;align-items:flex-start;">${num}<div style="flex:1;">${esc(b.enunciado)}</div></div>
+    <div style="display:flex;align-items:flex-start;">${num}<div style="flex:1;white-space:pre-wrap;">${esc(limparEnunciado(b.enunciado, b.numero != null))}</div></div>
     ${img}${resposta}
   </div>`;
 }
@@ -134,18 +162,27 @@ export function paginaHtml(folha: Folha, idx: number): string {
        </div>`
     : "";
 
+  // Nome/turma/data só na primeira página: repetir o cabeçalho inteiro em todas
+  // come o espaço útil e não serve para nada, já que o aluno preenche uma vez.
+  const cabecalho = idx === 0
+    ? `<div style="border-bottom:2px solid #ddd;padding-bottom:12px;margin-bottom:18px;">
+         <div style="font-size:${pt * 0.72}pt;letter-spacing:2px;color:#888;text-transform:uppercase;">Atividade Pedagógica</div>
+         <div style="font-size:${pt * 1.5}pt;font-weight:700;margin-top:4px;">${esc(folha.titulo || "Atividade")}</div>
+         ${folha.disciplina ? `<div style="font-size:${pt * 0.8}pt;color:#777;margin-top:2px;">${esc(folha.disciplina)}</div>` : ""}
+       </div>
+       <div style="display:flex;gap:20px;padding:10px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;font-size:${pt * 0.85}pt;margin-bottom:${pt * 1.6}px;">
+         <div style="flex:2;">Nome: <span style="display:inline-block;border-bottom:1px solid #333;min-width:190px;"></span></div>
+         <div style="flex:1;">Turma: <span style="display:inline-block;border-bottom:1px solid #333;min-width:70px;"></span></div>
+         <div style="flex:1;">Data: ___/___/______</div>
+       </div>`
+    : `<div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:${pt * 1.6}px;">
+         <span style="font-size:${pt * 0.95}pt;font-weight:700;">${esc(folha.titulo || "Atividade")}</span>
+         <span style="font-size:${pt * 0.72}pt;color:#999;">Página ${idx + 1} de ${total}</span>
+       </div>`;
+
   return `<div style="width:794px;min-height:1123px;box-sizing:border-box;padding:56px 64px;background:#fff;color:#111;
       font-family:${pilhaFonte(cfg.fonte)};font-size:${pt}pt;line-height:${cfg.espacamento ?? 1.5};">
-    <div style="border-bottom:2px solid #ddd;padding-bottom:12px;margin-bottom:18px;">
-      <div style="font-size:${pt * 0.72}pt;letter-spacing:2px;color:#888;text-transform:uppercase;">Atividade Pedagógica</div>
-      <div style="font-size:${pt * 1.5}pt;font-weight:700;margin-top:4px;">${esc(folha.titulo || "Atividade")}</div>
-      ${folha.disciplina ? `<div style="font-size:${pt * 0.8}pt;color:#777;margin-top:2px;">${esc(folha.disciplina)}</div>` : ""}
-    </div>
-    <div style="display:flex;gap:20px;padding:10px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;font-size:${pt * 0.85}pt;margin-bottom:${pt * 1.6}px;">
-      <div style="flex:2;">Nome: <span style="display:inline-block;border-bottom:1px solid #333;min-width:190px;"></span></div>
-      <div style="flex:1;">Turma: <span style="display:inline-block;border-bottom:1px solid #333;min-width:70px;"></span></div>
-      <div style="flex:1;">Data: ___/___/______</div>
-    </div>
+    ${cabecalho}
     ${materialHtml}
     ${instrucoes}
     ${(pag.blocos ?? []).map((b) => blocoHtml(b, pt)).join("")}
@@ -262,23 +299,32 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
   paginas.forEach((pag, pi) => {
     if (pi > 0) filhos.push(new Paragraph({ children: [new PageBreak()] }));
 
-    filhos.push(new Paragraph({
-      children: [new TextRun({ text: "ATIVIDADE PEDAGÓGICA", size: Math.round(half * 0.7), color: "888888", font: fonte })],
-      spacing: { after: 60 },
-    }));
-    filhos.push(new Paragraph({
-      children: [new TextRun({ text: folha.titulo || "Atividade", bold: true, size: Math.round(half * 1.5), font: fonte })],
-      heading: HeadingLevel.HEADING_1,
-      spacing: { after: 80 },
-      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "DDDDDD", space: 6 } },
-    }));
-    filhos.push(new Paragraph({
-      children: [new TextRun({
-        text: "Nome: ______________________________   Turma: __________   Data: ___/___/______",
-        size: Math.round(half * 0.85), font: fonte,
-      })],
-      spacing: { before: 160, after: 220 },
-    }));
+    if (pi === 0) {
+      filhos.push(new Paragraph({
+        children: [new TextRun({ text: "ATIVIDADE PEDAGÓGICA", size: Math.round(half * 0.7), color: "888888", font: fonte })],
+        spacing: { after: 60 },
+      }));
+      filhos.push(new Paragraph({
+        children: [new TextRun({ text: folha.titulo || "Atividade", bold: true, size: Math.round(half * 1.5), font: fonte })],
+        heading: HeadingLevel.HEADING_1,
+        spacing: { after: 80 },
+        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "DDDDDD", space: 6 } },
+      }));
+      filhos.push(new Paragraph({
+        children: [new TextRun({
+          text: "Nome: ______________________________   Turma: __________   Data: ___/___/______",
+          size: Math.round(half * 0.85), font: fonte,
+        })],
+        spacing: { before: 160, after: 220 },
+      }));
+    } else {
+      // Páginas seguintes: só o título, sem repetir nome/turma/data.
+      filhos.push(new Paragraph({
+        children: [new TextRun({ text: folha.titulo || "Atividade", bold: true, size: Math.round(half * 0.95), font: fonte })],
+        border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "DDDDDD", space: 4 } },
+        spacing: { after: 200 },
+      }));
+    }
 
     // Material anexado pelo professor, impresso na folha
     const mat = folha.material_original;
@@ -315,7 +361,7 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
     (pag.blocos ?? []).forEach((b) => {
       filhos.push(new Paragraph({
         children: [new TextRun({
-          text: `${b.numero != null ? `${b.numero}. ` : ""}${b.enunciado}`,
+          text: `${b.numero != null ? `${b.numero}. ` : ""}${limparEnunciado(b.enunciado, b.numero != null)}`,
           size: half, font: fonte, bold: true,
         })],
         spacing: { before: 220, after: 110, line: linhaEspaco },
@@ -360,14 +406,26 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
           filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
           break;
         case "completar":
+          // mesma regra do HTML: sem lacuna no enunciado, dá a linha
+          if (!temLacuna(b.enunciado)) {
+            for (let i = 0; i < linhas; i++) {
+              filhos.push(new Paragraph({
+                children: [new TextRun({ text: " ", size: half, font: fonte })],
+                border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 10 } },
+                spacing: { after: 200, line: linhaEspaco },
+              }));
+            }
+          }
           break;
         default:
-          for (let i = 0; i < linhas; i++) {
-            filhos.push(new Paragraph({
-              children: [new TextRun({ text: " ", size: half, font: fonte })],
-              border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 10 } },
-              spacing: { after: 200, line: linhaEspaco },
-            }));
+          if (!temLacuna(b.enunciado)) {
+            for (let i = 0; i < linhas; i++) {
+              filhos.push(new Paragraph({
+                children: [new TextRun({ text: " ", size: half, font: fonte })],
+                border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 10 } },
+                spacing: { after: 200, line: linhaEspaco },
+              }));
+            }
           }
       }
     });

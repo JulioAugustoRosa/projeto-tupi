@@ -65,9 +65,9 @@ const FOLHA_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gerar-folha
 
 /** Espelha a lista fixa validada no servidor (supabase/functions/adapt-compare). */
 const MODELOS = [
-  { id: "openai/gpt-5-nano", nome: "ChatGPT", detalhe: "GPT-5 Nano" },
-  { id: "google/gemini-2.5-flash-lite", nome: "Gemini", detalhe: "2.5 Flash Lite" },
-  { id: "anthropic/claude-haiku-5.5", nome: "Claude", detalhe: "Haiku 5.5" },
+  { id: "openai/gpt-5-nano", nome: "GPT-5 Nano", detalhe: "mais rápido" },
+  { id: "openai/gpt-5-mini", nome: "GPT-5 Mini", detalhe: "intermediário" },
+  { id: "openai/gpt-5", nome: "GPT-5", detalhe: "mais capaz" },
 ] as const;
 
 const MAX_ARQUIVO_MB = 4;
