@@ -3,7 +3,8 @@
 
 import {
   AlignmentType, BorderStyle, Document, HeadingLevel, ImageRun, Packer,
-  PageBreak, Paragraph, TextRun,
+  PageBreak, Paragraph, Table, TableCell, TableRow, TextRun, VerticalAlign,
+  WidthType,
 } from "docx";
 
 export interface BlocoFolha {
@@ -152,15 +153,47 @@ const dataUrlParaBytes = (d: string): Uint8Array => {
 const tipoImagem = (d: string): "png" | "jpg" =>
   d.slice(0, 30).includes("image/png") ? "png" : "jpg";
 
+/**
+ * No Word não existe fallback de fonte: se a fonte não estiver instalada na
+ * máquina, ele troca por uma qualquer — normalmente uma serifada, que é o
+ * oposto do que a adaptação de dislexia pede. Lexend quase nunca está
+ * instalada, então no DOCX usamos Verdana, que vem em todo Windows e Mac e
+ * também é recomendada para leitores com dislexia. No preview em HTML a
+ * Lexend continua sendo usada, porque lá existe pilha de fallback.
+ */
+function fonteDocx(fonte?: string): string {
+  const f = (fonte || "Verdana").trim();
+  const arriscadas = ["lexend", "opendyslexic", "dyslexie", "atkinson hyperlegible"];
+  return arriscadas.includes(f.toLowerCase()) ? "Verdana" : f;
+}
+
+/** Caixa de resposta com altura real: tabela de 1 célula com altura fixa. */
+function caixaResposta(alturaTwips: number, tracejada: boolean): Table {
+  const estilo = tracejada ? BorderStyle.DASHED : BorderStyle.SINGLE;
+  const cor = tracejada ? "999999" : "333333";
+  const borda = { style: estilo, size: tracejada ? 8 : 6, color: cor };
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [new TableRow({
+      height: { value: alturaTwips, rule: "atLeast" },
+      children: [new TableCell({
+        verticalAlign: VerticalAlign.TOP,
+        borders: { top: borda, bottom: borda, left: borda, right: borda },
+        children: [new Paragraph({ children: [new TextRun({ text: " " })] })],
+      })],
+    })],
+  });
+}
+
 export async function folhaParaDocx(folha: Folha): Promise<Blob> {
   const cfg = folha.config ?? {};
   const pt = cfg.tamanho_pt ?? 12;
   const half = pt * 2;                                  // docx mede em meios-pontos
-  const fonte = cfg.fonte || "Verdana";
+  const fonte = fonteDocx(cfg.fonte);
   const linhaEspaco = Math.round((cfg.espacamento ?? 1.5) * 240);
   const paginas = folha.paginas ?? [];
 
-  const filhos: Paragraph[] = [];
+  const filhos: (Paragraph | Table)[] = [];
 
   paginas.forEach((pag, pi) => {
     if (pi > 0) filhos.push(new Paragraph({ children: [new PageBreak()] }));
@@ -230,28 +263,14 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
           })));
           break;
         case "desenho":
-          filhos.push(new Paragraph({
-            children: [new TextRun({ text: " ", size: half, font: fonte })],
-            border: {
-              top: { style: BorderStyle.DASHED, size: 8, color: "999999", space: 4 },
-              bottom: { style: BorderStyle.DASHED, size: 8, color: "999999", space: 4 },
-              left: { style: BorderStyle.DASHED, size: 8, color: "999999", space: 4 },
-              right: { style: BorderStyle.DASHED, size: 8, color: "999999", space: 4 },
-            },
-            spacing: { before: 120, after: 1800 },
-          }));
+          // ~7cm de altura para o aluno desenhar
+          filhos.push(caixaResposta(4000, true));
+          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
           break;
         case "caixa":
-          filhos.push(new Paragraph({
-            children: [new TextRun({ text: " ", size: half, font: fonte })],
-            border: {
-              top: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 4 },
-              bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 4 },
-              left: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 4 },
-              right: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 4 },
-            },
-            spacing: { before: 120, after: 160 + linhas * 220 },
-          }));
+          // cada "linha" pedida vira ~1cm de altura útil
+          filhos.push(caixaResposta(Math.max(1200, linhas * 620), false));
+          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
           break;
         case "completar":
           break;
