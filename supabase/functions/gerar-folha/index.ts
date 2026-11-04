@@ -11,7 +11,7 @@ const MAX_TOKENS = 6000;
 const MAX_CONTEUDO = 12000;
 const LIMITE_DIARIO = 60;
 const TIMEOUT_MS = 60_000;
-const MAX_IMAGENS = 6;
+const MAX_IMAGENS = 10;  // folha de alfabetização é quase toda imagem
 const MAX_ANEXOS = 2;
 const MAX_ANEXO_BYTES = 4_000_000;
 const MAX_PAGINAS = 8;
@@ -142,8 +142,10 @@ Seu trabalho aqui é SÓ DIAGRAMAR: transformar isso em páginas e blocos.
 - NÃO invente exercícios novos, nem remova exercícios existentes.
 - Cada exercício do texto vira um bloco, com o "formato" adequado ao tipo de resposta
   que o enunciado pede (linhas, caixa, multipla, completar, ligar, desenho).
-- Se o texto indicar uma figura entre parênteses, por exemplo "(Figura de uma bola)",
-  transforme isso em "imagem_prompt" e tire a menção do enunciado.
+- As ilustrações já foram separadas do texto e serão coladas nos blocos na ordem em
+  que você criá-los. Por isso: MANTENHA A ORDEM DOS EXERCÍCIOS do texto e crie UM
+  BLOCO POR EXERCÍCIO. Não junte dois exercícios num bloco nem inverta a ordem, ou a
+  figura cai no exercício errado. Deixe "imagem_prompt" vazio: ele é preenchido depois.
 
 O QUE NÃO É EXERCÍCIO (erros comuns, evite):
 - Frases de comando geral ("Olhe as figuras", "Leia junto com o professor", "Agora vamos
@@ -171,13 +173,20 @@ Não invente divisões. Palavras de uma sílaba só (GOL, PÃO, SOL, MAR) NÃO s
 ${conteudo}
 
 REGRAS DE PREENCHIMENTO:
+0. ENUNCIADO CURTO: no máximo 8 palavras por bloco. Se o texto de entrada trouxe um
+   enunciado longo, encurte mantendo o comando. O estudante está aprendendo a ler.
 1. NUNCA altere o conteúdo pedagógico. Só a forma de apresentar.
 2. Em "adaptacoes_aplicadas", escreva uma frase por decisão, ligando ao perfil.
    Ex: "3 páginas com 1 exercício cada, porque o aluno se sobrecarrega com muita informação".
 3. "itens_por_pagina" deve bater com o número real de blocos em cada página.
 4. Em "completar", use underscores contínuos SEM espaços: "b_l_" certo, "b _ l _" errado.
-5. "imagem_prompt" só quando a ilustração ajudar de verdade. No máximo ${MAX_IMAGENS} no total.
-   Escreva em inglês e termine com "simple black and white line drawing, white background".
+5. "imagem_prompt" em QUASE TODO bloco — esta é uma folha de alfabetização, o apoio
+   visual é o conteúdo principal. No máximo ${MAX_IMAGENS} no total.
+   Escreva em inglês, descrevendo UM objeto concreto isolado, e termine sempre com:
+   "thick black outline coloring book style, flat white background, no text, no letters,
+   no shading, centered, simple children worksheet clip art".
+   Nada de cena complexa, pessoa realista, fundo ou sombra: é desenho de contorno para
+   criança em alfabetização reconhecer de imediato.
 6. Responda em português brasileiro nos textos voltados ao aluno.
 7. Entre 1 e 8 páginas. Páginas existem para distribuir EXERCÍCIOS REAIS: se a atividade
    tem 5 exercícios, ela não pode virar 9 páginas. Conte os exercícios do texto antes de
@@ -191,24 +200,83 @@ ${ESQUEMA}`;
 // Ilustrações: baixadas no servidor e embutidas em base64, para a exportação
 // não depender de rede nem de CORS no navegador.
 // ---------------------------------------------------------------------------
-async function baixarIlustracao(prompt: string): Promise<string | null> {
+/** Estilo exigido da ilustração: contorno grosso, sem texto, sem fundo. */
+const ESTILO_ILUSTRACAO =
+  "thick black outline coloring book style, flat white background, no text, no letters, " +
+  "no shading, centered, simple children worksheet clip art";
+
+/**
+ * Extrai as marcações [IMAGEM: ...] do texto da atividade, na ordem em que
+ * aparecem, e devolve o texto já limpo.
+ *
+ * Isso é feito em código, não pelo modelo: ao pedir que ele próprio convertesse as
+ * marcações em "imagem_prompt", ele descartava a maioria — numa folha de
+ * alfabetização, onde a figura é o conteúdo principal, perder imagem é perder a
+ * atividade.
+ */
+function extrairImagens(texto: string): { limpo: string; descricoes: string[] } {
+  const descricoes: string[] = [];
+  const limpo = (texto || "").replace(
+    /\[\s*(?:IMAGEM|IMAGE|FIGURA|DESENHO)\s*:\s*([^\]]+)\]/gi,
+    (_m, desc: string) => {
+      descricoes.push(String(desc).trim().slice(0, 120));
+      return "";
+    },
+  );
+  return { limpo: limpo.replace(/[ \t]{2,}/g, " ").trim(), descricoes };
+}
+
+const MODELO_IMAGEM = "google/gemini-2.5-flash-image";
+
+/**
+ * Gera uma ilustração pela OpenRouter e devolve como data URL.
+ *
+ * Substitui o Pollinations, que passou a responder 402 (pagamento exigido) e 503.
+ * Como a OpenRouter já está paga para os modelos de texto, a mesma chave serve.
+ */
+async function baixarIlustracao(prompt: string, apiKey: string): Promise<string | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45_000);
   try {
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true&model=flux`;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 20_000);
-    const r = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!r.ok) return null;
-    const buf = new Uint8Array(await r.arrayBuffer());
-    if (buf.byteLength > 1_500_000) return null;
-    let bin = "";
-    for (let i = 0; i < buf.length; i += 8192) {
-      bin += String.fromCharCode(...buf.subarray(i, i + 8192));
+    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://tupi-adp.vercel.app",
+        "X-Title": "TUPI",
+      },
+      body: JSON.stringify({
+        model: MODELO_IMAGEM,
+        modalities: ["image", "text"],
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!r.ok) {
+      console.error(`ilustração HTTP ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+      return null;
     }
-    const mime = r.headers.get("content-type")?.split(";")[0] || "image/jpeg";
-    return `data:${mime};base64,${btoa(bin)}`;
-  } catch {
+
+    const data = await r.json();
+    const msg = data?.choices?.[0]?.message;
+    // A imagem pode vir em message.images[] ou dentro de content[]
+    const direta = msg?.images?.[0]?.image_url?.url;
+    if (typeof direta === "string" && direta.startsWith("data:")) return direta;
+    if (Array.isArray(msg?.content)) {
+      for (const parte of msg.content) {
+        const u = parte?.image_url?.url;
+        if (typeof u === "string" && u.startsWith("data:")) return u;
+      }
+    }
+    console.error("ilustração sem imagem:", JSON.stringify(data).slice(0, 250));
     return null;
+  } catch (e) {
+    console.error("ilustração falhou:", (e as Error).message);
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -302,10 +370,14 @@ serve(async (req) => {
       if (ok.length) ctx += `\n${ok.join("\n")}`;
     }
 
+    // As ilustrações são retiradas do texto aqui e reatribuídas aos blocos depois,
+    // sem depender de o modelo preservá-las.
+    const { limpo: textoSemImagens, descricoes: descImagens } = extrairImagens(texto);
+
     // Mensagem do usuário: prompt + o material anexado, para o modelo escrever
     // enunciados que apontem para o que realmente está na imagem.
     const partesUsuario: unknown[] = [
-      { type: "text", text: montarPrompt(ctx, texto, listaAnexos.length > 0) },
+      { type: "text", text: montarPrompt(ctx, textoSemImagens, listaAnexos.length > 0) },
     ];
     for (const a of listaAnexos) {
       const dataUrl = `data:${a.mime};base64,${a.data}`;
@@ -393,6 +465,21 @@ serve(async (req) => {
       }
     }
 
+    // Devolve as ilustrações aos blocos, na ordem em que apareciam no texto.
+    // O que o modelo tiver inventado em "imagem_prompt" é descartado: a descrição
+    // boa é a que veio da adaptação, que conhece o perfil do estudante.
+    if (descImagens.length > 0) {
+      const blocos: { imagem_prompt?: string }[] = [];
+      for (const p of ((folha.paginas ?? []) as PaginaBruta[])) {
+        for (const b of (p.blocos ?? [])) blocos.push(b);
+      }
+      blocos.forEach((b, i) => {
+        if (i < descImagens.length) b.imagem_prompt = descImagens[i];
+        else if (!b.imagem_prompt) delete b.imagem_prompt;
+      });
+      console.log(`ilustrações reatribuídas: ${Math.min(blocos.length, descImagens.length)} de ${descImagens.length}`);
+    }
+
     // Renumeração sequencial em toda a folha. O modelo costuma reiniciar a
     // contagem a cada página ou repetir o mesmo número, e o renderizador tira a
     // numeração que vem dentro do enunciado para não duplicar — então o número
@@ -415,7 +502,9 @@ serve(async (req) => {
           if (b.imagem_prompt && alvos.length < MAX_IMAGENS) alvos.push(b);
         }
       }
-      const imagens = await Promise.all(alvos.map((b) => baixarIlustracao(b.imagem_prompt!)));
+      const imagens = await Promise.all(
+        alvos.map((b) => baixarIlustracao(`${b.imagem_prompt!}, ${ESTILO_ILUSTRACAO}`, apiKey)),
+      );
       alvos.forEach((b, i) => {
         if (imagens[i]) b.imagem = imagens[i]!;
         delete b.imagem_prompt;

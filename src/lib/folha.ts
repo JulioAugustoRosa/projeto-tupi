@@ -73,7 +73,7 @@ const temLacuna = (txt: string) => /_{3,}/.test(txt || "");
 function limparEnunciado(txt: string, temNumero: boolean): string {
   let t = txt || "";
   if (temNumero) t = t.replace(/^\s*\d+\s*[).\-–]\s*/, "");
-  t = t.replace(/\[\s*(?:desenho|imagem|figura|foto)\s+(?:de|da|do|dos|das)?\s*[^\]]*\]/gi, "");
+  t = t.replace(/\[\s*(?:desenho|imagem|figura|foto)\s*:?\s*(?:de|da|do|dos|das)?\s*[^\]]*\]/gi, "");
   return t.replace(/[ \t]{2,}/g, " ").trim();
 }
 
@@ -129,7 +129,7 @@ function blocoHtml(b: BlocoFolha, pt: number): string {
   }
 
   const img = b.imagem
-    ? `<div style="text-align:center;margin:12px 0;"><img src="${b.imagem}" alt="" style="max-width:190px;max-height:190px;object-fit:contain;" /></div>`
+    ? `<div style="text-align:center;margin:12px 0;"><img src="${b.imagem}" alt="" style="max-width:250px;max-height:250px;object-fit:contain;" /></div>`
     : "";
 
   return `<div style="margin-bottom:${pt * 2}px;break-inside:avoid;">
@@ -374,7 +374,7 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
             children: [new ImageRun({
               data: dataUrlParaBytes(b.imagem),
               type: tipoImagem(b.imagem),
-              transformation: { width: 190, height: 190 },
+              transformation: { width: 230, height: 230 },
             })],
             spacing: { after: 140 },
           }));
