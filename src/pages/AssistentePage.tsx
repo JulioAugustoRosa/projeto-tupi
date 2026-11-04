@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -51,8 +52,10 @@ interface Message {
   comparacao?: ResultadoModelo[];
   alunoNome?: string;
   alunoId?: string;
-  /** material anexado, repassado à folha para ser impresso nela */
+  /** material anexado nesta sessão, repassado à folha para ser impresso nela */
   anexos?: { nome: string; mime: string; data: string }[];
+  /** material salvo no storage, para a folha ainda funcionar após recarregar */
+  material?: { nome: string; mime: string; path: string } | null;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
@@ -162,13 +165,25 @@ const AssistentePage = () => {
     setConversationId(convId);
     const { data: msgs } = await supabase
       .from("chat_messages")
-      .select("id, role, content")
+      .select("id, role, content, metadata")
       .eq("conversation_id", convId)
       .order("created_at", { ascending: true });
     if (msgs && msgs.length > 0) {
-      setMessages([WELCOME_MSG, ...msgs.map((m: any) => ({
-        id: m.id, role: m.role as "user" | "assistant", content: m.content,
-      }))]);
+      setMessages([WELCOME_MSG, ...msgs.map((m: any) => {
+        const base: Message = {
+          id: m.id, role: m.role as "user" | "assistant", content: m.content,
+        };
+        // Remonta os painéis lado a lado em vez de mostrar tudo num texto só.
+        const meta = m.metadata;
+        if (meta?.tipo === "comparacao" && Array.isArray(meta.resultados)) {
+          base.comparacao = meta.resultados as ResultadoModelo[];
+          base.alunoNome = meta.aluno;
+          base.alunoId = meta.aluno_id;
+          base.material = meta.material ?? null;
+          base.content = `Adaptação para **${meta.aluno}** — ${meta.resultados.length} modelo(s).`;
+        }
+        return base;
+      })]);
     } else {
       setMessages([WELCOME_MSG]);
     }
@@ -306,6 +321,20 @@ const AssistentePage = () => {
       if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
 
       const resultados: ResultadoModelo[] = result.resultados ?? [];
+
+      // O material anexado vai para o storage: assim, ao reabrir a conversa,
+      // ainda dá para gerar a folha com a imagem original.
+      let material: { nome: string; mime: string; path: string } | null = null;
+      if (anexos.length > 0) {
+        const img = anexos.find((a) => a.file.type.startsWith("image/")) ?? anexos[0];
+        try {
+          const ext = img.file.name.split(".").pop() || "bin";
+          const path = `${user.id}/material/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          const { error } = await supabase.storage.from("attachments").upload(path, img.file);
+          if (!error) material = { nome: img.file.name, mime: img.file.type, path };
+        } catch { /* sem material salvo: a folha ainda pode ser gerada sem ele */ }
+      }
+
       const compMsg: Message = {
         id: "comp-" + Date.now(),
         role: "assistant",
@@ -314,10 +343,12 @@ const AssistentePage = () => {
         alunoNome: result.aluno ?? nomeAluno,
         alunoId,
         anexos: arquivos,
+        material,
       };
       setMessages((prev) => [...prev, compMsg]);
 
-      // Guarda em texto para a conversa continuar legível ao recarregar.
+      // content continua em markdown legível (é ele que vai para a exportação);
+      // metadata guarda a estrutura, para a tela remontar os painéis.
       const registro = resultados
         .map((r) => `### ${r.nome}\n\n${r.conteudo ?? `_${r.erro}_`}`)
         .join("\n\n---\n\n");
@@ -325,6 +356,14 @@ const AssistentePage = () => {
         conversation_id: convId,
         role: "assistant",
         content: `**Comparação de adaptações — ${result.aluno ?? nomeAluno}**\n\n${registro}`,
+        // cast: o tipo Json gerado exige index signature, que as interfaces não têm
+        metadata: {
+          tipo: "comparacao",
+          aluno: result.aluno ?? nomeAluno,
+          aluno_id: alunoId,
+          resultados,
+          material,
+        } as unknown as Json,
       });
       await supabase.from("chat_conversations")
         .update({ updated_at: new Date().toISOString() }).eq("id", convId);
@@ -698,14 +737,39 @@ const AssistentePage = () => {
   // Folha de atividade: o layout é decidido pelo perfil do aluno
   // ---------------------------------------------------------------------
 
+  /** Baixa do storage um material salvo e devolve em base64. */
+  const materialDoStorage = async (
+    mat: { nome: string; mime: string; path: string },
+  ): Promise<{ nome: string; mime: string; data: string } | null> => {
+    try {
+      const { data, error } = await supabase.storage.from("attachments").download(mat.path);
+      if (error || !data) return null;
+      const b64 = await new Promise<string>((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => { const r = String(fr.result || ""); res(r.slice(r.indexOf(",") + 1)); };
+        fr.onerror = () => rej(new Error("falha ao ler"));
+        fr.readAsDataURL(data);
+      });
+      return { nome: mat.nome, mime: mat.mime, data: b64 };
+    } catch {
+      return null;
+    }
+  };
+
   const gerarFolha = async (
     chaveBotao: string,
     alunoDaFolha: string,
     conteudo: string,
-    anexos?: { nome: string; mime: string; data: string }[],
+    msg?: Message,
   ) => {
     setGerandoFolha(chaveBotao);
     try {
+      // Na sessão o anexo está em memória; depois de recarregar, vem do storage.
+      let anexos = msg?.anexos;
+      if ((!anexos || anexos.length === 0) && msg?.material) {
+        const recuperado = await materialDoStorage(msg.material);
+        if (recuperado) anexos = [recuperado];
+      }
       const { data: sessionData } = await supabase.auth.getSession();
       const resp = await fetch(FOLHA_URL, {
         method: "POST",
@@ -1080,7 +1144,7 @@ const AssistentePage = () => {
                                 className="h-8 w-full text-xs"
                                 disabled={!!gerandoFolha}
                                 onClick={() =>
-                                  gerarFolha(msg.id + r.modelo, msg.alunoId ?? "", r.conteudo ?? "", msg.anexos)
+                                  gerarFolha(msg.id + r.modelo, msg.alunoId ?? "", r.conteudo ?? "", msg)
                                 }
                               >
                                 {gerandoFolha === msg.id + r.modelo ? (
