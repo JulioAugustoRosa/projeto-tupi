@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 const MODELO = "google/gemini-2.5-flash-lite";
 const MAX_TOKENS = 6000;
 const MAX_CONTEUDO = 12000;
-const LIMITE_DIARIO = 60;
+const LIMITE_DIARIO = 200;       // compartilhado com adapt-compare
 const TIMEOUT_MS = 60_000;
 const MAX_IMAGENS = 10;  // folha de alfabetização é quase toda imagem
 const MAX_ANEXOS = 2;

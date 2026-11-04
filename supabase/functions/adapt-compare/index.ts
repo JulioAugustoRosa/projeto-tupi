@@ -39,7 +39,7 @@ const MAX_ARQUIVOS = 2;
 // Tokens de raciocínio contam dentro do max_tokens, então há folga sobre as
 // ~700 palavras pedidas no prompt. É um teto, não consumo garantido.
 const MAX_TOKENS = 5000;  // a atividade do aluno não tem limite: precisa caber
-const LIMITE_DIARIO = 60;        // chamadas por professor por dia
+const LIMITE_DIARIO = 200;       // chamadas pagas por professor por dia (fase de testes)
 const TIMEOUT_MS = 120_000;  // GPT-5 é o mais lento dos três
 
 // CORS restrito à origem do app (nada de "*").
