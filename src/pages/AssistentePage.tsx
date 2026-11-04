@@ -862,7 +862,9 @@ const AssistentePage = () => {
         for (let i = 0; i < totalPaginas; i++) {
           const canvas = await renderizarPagina(folha, i);
           if (i > 0) pdf.addPage();
-          pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, 210, 297, undefined, "FAST");
+          // PNG, não JPEG: a folha é quase toda branca, e a compressão JPEG deixava
+          // faixas acinzentadas em volta dos desenhos de contorno.
+          pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 210, 297, undefined, "FAST");
         }
         pdf.save(`${nomeBase(folha)}.pdf`);
       }

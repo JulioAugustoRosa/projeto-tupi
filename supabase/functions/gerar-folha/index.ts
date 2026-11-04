@@ -201,9 +201,12 @@ ${ESQUEMA}`;
 // não depender de rede nem de CORS no navegador.
 // ---------------------------------------------------------------------------
 /** Estilo exigido da ilustração: contorno grosso, sem texto, sem fundo. */
+// Sem as palavras "coloring book" e "worksheet": elas contaminam o resultado e o
+// modelo de imagem acaba desenhando livros e estantes em vez do objeto pedido.
 const ESTILO_ILUSTRACAO =
-  "thick black outline coloring book style, flat white background, no text, no letters, " +
-  "no shading, centered, simple children worksheet clip art";
+  "black and white line art, thick clean outlines, no shading, no color fill, " +
+  "plain white background, no text, no letters, no numbers, single object, centered, " +
+  "simple flat illustration for a young child";
 
 /**
  * Extrai as marcações [IMAGEM: ...] do texto da atividade, na ordem em que
@@ -468,16 +471,27 @@ serve(async (req) => {
     // Devolve as ilustrações aos blocos, na ordem em que apareciam no texto.
     // O que o modelo tiver inventado em "imagem_prompt" é descartado: a descrição
     // boa é a que veio da adaptação, que conhece o perfil do estudante.
-    if (descImagens.length > 0) {
-      const blocos: { imagem_prompt?: string }[] = [];
+    {
+      const blocos: { imagem_prompt?: string; enunciado?: string }[] = [];
       for (const p of ((folha.paginas ?? []) as PaginaBruta[])) {
         for (const b of (p.blocos ?? [])) blocos.push(b);
       }
+      // A descrição inventada pelo modelo da diagramação é SEMPRE descartada: foi
+      // ela que encheu uma atividade de dinossauros com desenhos de livro. Vale a
+      // que veio da adaptação, que conhece o perfil; e, na falta dela, uma derivada
+      // do próprio enunciado, que ao menos fala do que o exercício trata.
       blocos.forEach((b, i) => {
-        if (i < descImagens.length) b.imagem_prompt = descImagens[i];
-        else if (!b.imagem_prompt) delete b.imagem_prompt;
+        if (i < descImagens.length) {
+          b.imagem_prompt = descImagens[i];
+        } else {
+          const base = (b.enunciado ?? "").replace(/\s+/g, " ").trim().slice(0, 90);
+          b.imagem_prompt = base
+            ? `ilustração do objeto principal citado nesta instrução escolar: "${base}". Desenhe apenas esse objeto, nada de texto.`
+            : "";
+        }
+        if (!b.imagem_prompt) delete b.imagem_prompt;
       });
-      console.log(`ilustrações reatribuídas: ${Math.min(blocos.length, descImagens.length)} de ${descImagens.length}`);
+      console.log(`ilustrações: ${descImagens.length} do texto, ${Math.max(0, blocos.length - descImagens.length)} derivadas do enunciado`);
     }
 
     // Renumeração sequencial em toda a folha. O modelo costuma reiniciar a

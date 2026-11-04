@@ -27,7 +27,8 @@ const MODELOS_PERMITIDOS: Record<string, { nome: string; reasoning?: Record<stri
   },
   "openai/gpt-5": {
     nome: "GPT-5",
-    reasoning: { effort: "medium" },
+    // "medium" estourava os 90s de timeout; "low" mantém a qualidade e cabe no tempo
+    reasoning: { effort: "low" },
   },
 };
 
@@ -39,7 +40,7 @@ const MAX_ARQUIVOS = 2;
 // ~700 palavras pedidas no prompt. É um teto, não consumo garantido.
 const MAX_TOKENS = 5000;  // a atividade do aluno não tem limite: precisa caber
 const LIMITE_DIARIO = 60;        // chamadas por professor por dia
-const TIMEOUT_MS = 90_000;  // o GPT-5 com reasoning medium chega perto de 45s
+const TIMEOUT_MS = 120_000;  // GPT-5 é o mais lento dos três
 
 // CORS restrito à origem do app (nada de "*").
 const ORIGENS_PERMITIDAS = [
