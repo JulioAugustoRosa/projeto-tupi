@@ -51,6 +51,8 @@ interface Message {
   comparacao?: ResultadoModelo[];
   alunoNome?: string;
   alunoId?: string;
+  /** material anexado, repassado à folha para ser impresso nela */
+  anexos?: { nome: string; mime: string; data: string }[];
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
@@ -311,6 +313,7 @@ const AssistentePage = () => {
         comparacao: resultados,
         alunoNome: result.aluno ?? nomeAluno,
         alunoId,
+        anexos: arquivos,
       };
       setMessages((prev) => [...prev, compMsg]);
 
@@ -695,7 +698,12 @@ const AssistentePage = () => {
   // Folha de atividade: o layout é decidido pelo perfil do aluno
   // ---------------------------------------------------------------------
 
-  const gerarFolha = async (chaveBotao: string, alunoDaFolha: string, conteudo: string) => {
+  const gerarFolha = async (
+    chaveBotao: string,
+    alunoDaFolha: string,
+    conteudo: string,
+    anexos?: { nome: string; mime: string; data: string }[],
+  ) => {
     setGerandoFolha(chaveBotao);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -706,7 +714,7 @@ const AssistentePage = () => {
           Authorization: `Bearer ${sessionData?.session?.access_token}`,
           apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
         },
-        body: JSON.stringify({ aluno_id: alunoDaFolha, conteudo, com_imagens: true }),
+        body: JSON.stringify({ aluno_id: alunoDaFolha, conteudo, com_imagens: true, anexos: anexos ?? [] }),
       });
       const result = await resp.json().catch(() => ({}));
       if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
@@ -1072,7 +1080,7 @@ const AssistentePage = () => {
                                 className="h-8 w-full text-xs"
                                 disabled={!!gerandoFolha}
                                 onClick={() =>
-                                  gerarFolha(msg.id + r.modelo, msg.alunoId ?? "", r.conteudo ?? "")
+                                  gerarFolha(msg.id + r.modelo, msg.alunoId ?? "", r.conteudo ?? "", msg.anexos)
                                 }
                               >
                                 {gerandoFolha === msg.id + r.modelo ? (

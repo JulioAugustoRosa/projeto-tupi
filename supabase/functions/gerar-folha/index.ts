@@ -12,6 +12,8 @@ const MAX_CONTEUDO = 12000;
 const LIMITE_DIARIO = 60;
 const TIMEOUT_MS = 60_000;
 const MAX_IMAGENS = 6;
+const MAX_ANEXOS = 2;
+const MAX_ANEXO_BYTES = 4_000_000;
 
 const ORIGENS_PERMITIDAS = [
   "https://tupi-adp.vercel.app",
@@ -41,8 +43,10 @@ const ESQUEMA = `{
     "fonte": "Lexend | Verdana | Arial",
     "tamanho_pt": 12,
     "espacamento": 1.5,
-    "itens_por_pagina": 3
+    "itens_por_pagina": 3,
+    "repetir_material": true
   },
+  "legenda_material": "rótulo curto do material anexado, ex: 'Tirinha da Turma da Mônica'",
   "paginas": [
     {
       "instrucoes": "1 ou 2 frases curtas dizendo ao aluno o que fazer nesta página",
@@ -61,10 +65,30 @@ const ESQUEMA = `{
   ]
 }`;
 
-function montarPrompt(ctx: string, conteudo: string) {
+function montarPrompt(ctx: string, conteudo: string, temMaterial: boolean) {
+  const sobreMaterial = temMaterial
+    ? `
+MATERIAL ORIGINAL ANEXADO — LEIA COM ATENÇÃO:
+O professor anexou o material original (a imagem que acompanha esta mensagem) e ele
+SERÁ IMPRESSO NA PRÓPRIA FOLHA, no topo da página 1, antes das instruções.
+Por isso:
+- NÃO transcreva o material inteiro dentro dos enunciados: o aluno vai vê-lo na folha.
+- Escreva enunciados que APONTEM para ele: "Observe a tirinha acima", "No quadrinho 2...".
+- Baseie as perguntas no que realmente aparece no material. Não invente personagens,
+  falas ou cenas que não estão lá.
+- Preencha "legenda_material" com um rótulo curto do que é esse material.
+- Se a folha tiver mais de uma página e o aluno se perder ao voltar páginas, marque
+  "repetir_material": true para o material ser reimpresso em todas as páginas.
+`
+    : `
+Não há material anexado: tudo o que o aluno precisa ler deve estar escrito nos enunciados.
+Deixe "legenda_material" como string vazia e "repetir_material" como false.
+`;
+
   return `Você monta FOLHAS DE ATIVIDADE IMPRESSAS para educação inclusiva, seguindo o DUA.
 
 ${ctx}
+${sobreMaterial}
 
 REGRA CENTRAL — O LAYOUT É UMA ADAPTAÇÃO, NÃO UM DETALHE:
 
@@ -166,14 +190,31 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => null);
     if (!body) return json({ error: "Corpo inválido" }, 400, origin);
-    const { aluno_id, conteudo, com_imagens } = body as {
+    const { aluno_id, conteudo, com_imagens, anexos } = body as {
       aluno_id?: string; conteudo?: string; com_imagens?: boolean;
+      anexos?: { nome?: string; mime?: string; data?: string }[];
     };
 
     if (!aluno_id) return json({ error: "Selecione um aluno." }, 400, origin);
     const texto = (conteudo ?? "").trim();
     if (!texto) return json({ error: "Falta o conteúdo da atividade." }, 400, origin);
     if (texto.length > MAX_CONTEUDO) return json({ error: "Conteúdo longo demais." }, 413, origin);
+
+    // Material anexado pelo professor. Só imagem é impressa na folha; PDF segue
+    // apenas como contexto para o modelo.
+    const listaAnexos = (Array.isArray(anexos) ? anexos : []).slice(0, MAX_ANEXOS);
+    for (const a of listaAnexos) {
+      if (typeof a?.data !== "string" || typeof a?.mime !== "string") {
+        return json({ error: "Anexo inválido." }, 400, origin);
+      }
+      if (a.data.length * 0.75 > MAX_ANEXO_BYTES) {
+        return json({ error: `Cada anexo deve ter no máximo ${MAX_ANEXO_BYTES / 1_000_000} MB.` }, 413, origin);
+      }
+      if (!a.mime.startsWith("image/") && a.mime !== "application/pdf") {
+        return json({ error: "Só são aceitos imagens e PDF." }, 415, origin);
+      }
+    }
+    const imagemMaterial = listaAnexos.find((a) => a.mime!.startsWith("image/"));
 
     // Rate limit compartilhado com a comparação de modelos
     const admin = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
@@ -218,6 +259,20 @@ serve(async (req) => {
       if (ok.length) ctx += `\n${ok.join("\n")}`;
     }
 
+    // Mensagem do usuário: prompt + o material anexado, para o modelo escrever
+    // enunciados que apontem para o que realmente está na imagem.
+    const partesUsuario: unknown[] = [
+      { type: "text", text: montarPrompt(ctx, texto, listaAnexos.length > 0) },
+    ];
+    for (const a of listaAnexos) {
+      const dataUrl = `data:${a.mime};base64,${a.data}`;
+      if (a.mime!.startsWith("image/")) {
+        partesUsuario.push({ type: "image_url", image_url: { url: dataUrl } });
+      } else {
+        partesUsuario.push({ type: "file", file: { filename: a.nome || "material.pdf", file_data: dataUrl } });
+      }
+    }
+
     // Chamada ao modelo
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -238,7 +293,7 @@ serve(async (req) => {
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: "Você devolve APENAS JSON válido, sem markdown e sem cercas de código." },
-            { role: "user", content: montarPrompt(ctx, texto) },
+            { role: "user", content: partesUsuario },
           ],
         }),
       });
@@ -279,6 +334,25 @@ serve(async (req) => {
         delete b.imagem_prompt;
       });
     }
+
+    // O material anexado é embutido pelo servidor, não pelo modelo: assim ele
+    // aparece impresso na folha exatamente como o professor enviou.
+    if (imagemMaterial) {
+      folha.material_original = {
+        imagem: `data:${imagemMaterial.mime};base64,${imagemMaterial.data}`,
+        legenda: typeof folha.legenda_material === "string" && folha.legenda_material.trim()
+          ? folha.legenda_material.trim()
+          : "Material da atividade",
+      };
+      // Decisão nossa, não do modelo: se a folha tem mais de uma página, o
+      // material vai em todas. Perguntar "no último quadrinho..." numa página
+      // onde a tirinha não aparece obriga o aluno a ficar voltando a folha —
+      // exatamente o que a adaptação deveria evitar.
+      const cfg = (folha.config ?? {}) as Record<string, unknown>;
+      cfg.repetir_material = ((folha.paginas as unknown[]) ?? []).length > 1;
+      folha.config = cfg;
+    }
+    delete folha.legenda_material;
 
     folha.aluno = aluno.nome;
     return json(folha, 200, origin);

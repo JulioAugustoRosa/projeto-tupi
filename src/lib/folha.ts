@@ -23,12 +23,27 @@ export interface PaginaFolha {
   blocos?: BlocoFolha[];
 }
 
+/** O material que o professor anexou (a tirinha, a prova, a folha original). */
+export interface MaterialOriginal {
+  /** data: URL em base64 da imagem enviada pelo professor */
+  imagem?: string;
+  legenda?: string;
+}
+
 export interface Folha {
   titulo?: string;
   disciplina?: string;
   aluno?: string;
   adaptacoes_aplicadas?: string[];
-  config?: { fonte?: string; tamanho_pt?: number; espacamento?: number; itens_por_pagina?: number };
+  config?: {
+    fonte?: string;
+    tamanho_pt?: number;
+    espacamento?: number;
+    itens_por_pagina?: number;
+    /** repete o material original em todas as páginas, para o aluno não precisar voltar */
+    repetir_material?: boolean;
+  };
+  material_original?: MaterialOriginal;
   paginas?: PaginaFolha[];
 }
 
@@ -106,6 +121,19 @@ export function paginaHtml(folha: Folha, idx: number): string {
     ? `<div style="background:#F5F5F5;border-left:4px solid #E95A3A;padding:12px 14px;margin-bottom:${pt * 2}px;border-radius:0 6px 6px 0;">${esc(pag.instrucoes)}</div>`
     : "";
 
+  // O material que o professor anexou, impresso na própria folha. Vai sempre na
+  // página 1; nas demais, só quando o perfil pedir para não fazer o aluno voltar.
+  const mat = folha.material_original;
+  const mostraMaterial = mat?.imagem && (idx === 0 || cfg.repetir_material);
+  const materialHtml = mostraMaterial
+    ? `<div style="border:1.5px solid #ddd;border-radius:8px;padding:10px;margin-bottom:${pt * 2}px;background:#FCFCFC;">
+         <div style="font-size:${pt * 0.72}pt;letter-spacing:1px;color:#888;text-transform:uppercase;margin-bottom:6px;">
+           ${esc(mat!.legenda || "Material da atividade")}
+         </div>
+         <img src="${mat!.imagem}" alt="" style="display:block;margin:0 auto;max-width:100%;max-height:330px;object-fit:contain;" />
+       </div>`
+    : "";
+
   return `<div style="width:794px;min-height:1123px;box-sizing:border-box;padding:56px 64px;background:#fff;color:#111;
       font-family:${pilhaFonte(cfg.fonte)};font-size:${pt}pt;line-height:${cfg.espacamento ?? 1.5};">
     <div style="border-bottom:2px solid #ddd;padding-bottom:12px;margin-bottom:18px;">
@@ -118,6 +146,7 @@ export function paginaHtml(folha: Folha, idx: number): string {
       <div style="flex:1;">Turma: <span style="display:inline-block;border-bottom:1px solid #333;min-width:70px;"></span></div>
       <div style="flex:1;">Data: ___/___/______</div>
     </div>
+    ${materialHtml}
     ${instrucoes}
     ${(pag.blocos ?? []).map((b) => blocoHtml(b, pt)).join("")}
     <div style="position:absolute;"></div>
@@ -152,6 +181,41 @@ const dataUrlParaBytes = (d: string): Uint8Array => {
 
 const tipoImagem = (d: string): "png" | "jpg" =>
   d.slice(0, 30).includes("image/png") ? "png" : "jpg";
+
+/** Largura e altura reais da imagem, lidas dos bytes (PNG e JPEG). */
+function dimensoesImagem(bytes: Uint8Array): { w: number; h: number } | null {
+  // PNG: IHDR traz largura e altura nos bytes 16..23
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset);
+    return { w: dv.getUint32(16), h: dv.getUint32(20) };
+  }
+  // JPEG: percorre os marcadores até achar um SOF
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let i = 2;
+    while (i < bytes.length - 9) {
+      if (bytes[i] !== 0xff) { i++; continue; }
+      const marcador = bytes[i + 1];
+      // SOF0..SOF15, pulando os que não carregam dimensão
+      if (marcador >= 0xc0 && marcador <= 0xcf &&
+          marcador !== 0xc4 && marcador !== 0xc8 && marcador !== 0xcc) {
+        const dv = new DataView(bytes.buffer, bytes.byteOffset);
+        return { h: dv.getUint16(i + 5), w: dv.getUint16(i + 7) };
+      }
+      i += 2 + ((bytes[i + 2] << 8) | bytes[i + 3]);
+    }
+  }
+  return null;
+}
+
+/** Encaixa o material anexado na largura útil da página, sem distorcer. */
+function dimensaoMaterial(dataUrl: string): { width: number; height: number } {
+  const MAX_W = 450;   // largura útil do A4 com as margens da folha
+  const MAX_H = 330;
+  const dim = dimensoesImagem(dataUrlParaBytes(dataUrl));
+  if (!dim || !dim.w || !dim.h) return { width: 400, height: 260 };
+  const escala = Math.min(MAX_W / dim.w, MAX_H / dim.h, 1);
+  return { width: Math.round(dim.w * escala), height: Math.round(dim.h * escala) };
+}
 
 /**
  * No Word não existe fallback de fonte: se a fonte não estiver instalada na
@@ -215,6 +279,29 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
       })],
       spacing: { before: 160, after: 220 },
     }));
+
+    // Material anexado pelo professor, impresso na folha
+    const mat = folha.material_original;
+    if (mat?.imagem && (pi === 0 || cfg.repetir_material)) {
+      try {
+        filhos.push(new Paragraph({
+          children: [new TextRun({
+            text: (mat.legenda || "Material da atividade").toUpperCase(),
+            size: Math.round(half * 0.72), color: "888888", font: fonte,
+          })],
+          spacing: { after: 80 },
+        }));
+        filhos.push(new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new ImageRun({
+            data: dataUrlParaBytes(mat.imagem),
+            type: tipoImagem(mat.imagem),
+            transformation: dimensaoMaterial(mat.imagem),
+          })],
+          spacing: { after: 260 },
+        }));
+      } catch { /* imagem inválida: segue sem o material */ }
+    }
 
     if (pag.instrucoes) {
       filhos.push(new Paragraph({
