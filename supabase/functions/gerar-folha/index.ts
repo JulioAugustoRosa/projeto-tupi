@@ -14,6 +14,7 @@ const TIMEOUT_MS = 60_000;
 const MAX_IMAGENS = 6;
 const MAX_ANEXOS = 2;
 const MAX_ANEXO_BYTES = 4_000_000;
+const MAX_PAGINAS = 8;
 
 const ORIGENS_PERMITIDAS = [
   "https://tupi-adp.vercel.app",
@@ -31,6 +32,11 @@ function cors(origin: string | null) {
 }
 const json = (b: unknown, s: number, o: string | null) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...cors(o), "Content-Type": "application/json" } });
+
+interface PaginaBruta {
+  instrucoes?: string;
+  blocos?: { imagem_prompt?: string; imagem?: string }[];
+}
 
 // ---------------------------------------------------------------------------
 // Esquema que o modelo deve devolver
@@ -104,6 +110,9 @@ Não aplique uma adaptação de uma condição que o aluno não tem.
   páginas. Menos densidade por página é a adaptação.
 - Dislexia, ou dificuldade de leitura/decodificação: fonte "Lexend", tamanho_pt >= 16,
   espacamento >= 1.8, enunciados curtos.
+- Em processo de alfabetização, fase silábica, ou leitura ainda não fluente (em qualquer
+  idade): fonte "Lexend", tamanho_pt >= 16, espacamento >= 1.8, enunciados muito curtos e
+  apoio visual. Letra pequena inviabiliza a decodificação de quem ainda está aprendendo a ler.
 - Discalculia: apoio visual e enunciados contextualizados; evite muitas contas juntas.
 - Deficiência visual ou baixa visão: tamanho_pt >= 18 e alto contraste.
 - Coordenação motora fina prejudicada: "linhas" com mais espaço (linhas >= 3) e caixas
@@ -126,7 +135,26 @@ HIPERFOCOS E INTERESSES:
 Se houver hiperfocos ou interesses registrados, AMBIENTE os enunciados nesses temas
 (personagens, contextos), sem mudar o conteúdo pedagógico nem o nível de exigência.
 
-CONTEÚDO DA ATIVIDADE (já adaptado pedagogicamente; transforme em folha impressa):
+ATIVIDADE DO ESTUDANTE, JÁ ADAPTADA E PRONTA:
+O texto abaixo já é a atividade que o estudante vai receber, com os enunciados escritos.
+Seu trabalho aqui é SÓ DIAGRAMAR: transformar isso em páginas e blocos.
+- PRESERVE os enunciados como estão. Reescreva apenas o mínimo para caber no formato.
+- NÃO invente exercícios novos, nem remova exercícios existentes.
+- Cada exercício do texto vira um bloco, com o "formato" adequado ao tipo de resposta
+  que o enunciado pede (linhas, caixa, multipla, completar, ligar, desenho).
+- Se o texto indicar uma figura entre parênteses, por exemplo "(Figura de uma bola)",
+  transforme isso em "imagem_prompt" e tire a menção do enunciado.
+
+O QUE NÃO É EXERCÍCIO (erros comuns, evite):
+- Frases de comando geral ("Olhe as figuras", "Leia junto com o professor", "Agora vamos
+  escrever") são INSTRUÇÕES: vão no campo "instrucoes" da página, nunca como bloco com
+  espaço de resposta.
+- Títulos de seção ("Parte 1", "Vamos tentar com BOLA:") não são exercícios. Junte o
+  título ao exercício que ele introduz, num bloco só.
+- Um exemplo resolvido que o texto traz ("Exemplo: BO - LA") entra dentro do enunciado
+  do primeiro exercício, não vira bloco separado.
+- Não quebre um exercício em vários blocos. Uma pergunta com itens a, b, c é UM bloco.
+
 ${conteudo}
 
 REGRAS DE PREENCHIMENTO:
@@ -138,7 +166,9 @@ REGRAS DE PREENCHIMENTO:
 5. "imagem_prompt" só quando a ilustração ajudar de verdade. No máximo ${MAX_IMAGENS} no total.
    Escreva em inglês e termine com "simple black and white line drawing, white background".
 6. Responda em português brasileiro nos textos voltados ao aluno.
-7. Entre 1 e 6 páginas.
+7. Entre 1 e 8 páginas. Páginas existem para distribuir EXERCÍCIOS REAIS: se a atividade
+   tem 5 exercícios, ela não pode virar 9 páginas. Conte os exercícios do texto antes de
+   decidir quantas páginas usar.
 
 Responda APENAS com um JSON válido neste formato, sem markdown e sem cercas de código:
 ${ESQUEMA}`;
@@ -317,6 +347,37 @@ serve(async (req) => {
     } catch {
       console.error("JSON inválido do modelo:", bruto.slice(0, 400));
       return json({ error: "O modelo devolveu um formato inesperado. Tente de novo." }, 502, origin);
+    }
+
+    // Teto de páginas garantido aqui, não no prompt: o modelo costuma estourar,
+    // transformando cada palavra numa página. Se passar do limite, os blocos são
+    // redistribuídos com a menor densidade que ainda caiba no teto, preservando a
+    // ordem e as instruções de cada página de origem.
+    {
+      const pags = (folha.paginas ?? []) as PaginaBruta[];
+      if (pags.length > MAX_PAGINAS) {
+        const blocos: { bloco: unknown; instrucao?: string; primeiro: boolean }[] = [];
+        for (const p of pags) {
+          (p.blocos ?? []).forEach((b, i) => {
+            blocos.push({ bloco: b, instrucao: p.instrucoes, primeiro: i === 0 });
+          });
+        }
+        const porPagina = Math.ceil(blocos.length / MAX_PAGINAS);
+        const novas: PaginaBruta[] = [];
+        for (let i = 0; i < blocos.length; i += porPagina) {
+          const grupo = blocos.slice(i, i + porPagina);
+          const comInstrucao = grupo.find((g) => g.primeiro && g.instrucao);
+          novas.push({
+            instrucoes: comInstrucao?.instrucao ?? grupo[0].instrucao,
+            blocos: grupo.map((g) => g.bloco) as PaginaBruta["blocos"],
+          });
+        }
+        console.log(`folha reequilibrada: ${pags.length} -> ${novas.length} páginas`);
+        folha.paginas = novas;
+        const cfg = (folha.config ?? {}) as Record<string, unknown>;
+        cfg.itens_por_pagina = porPagina;
+        folha.config = cfg;
+      }
     }
 
     // Ilustrações embutidas em base64

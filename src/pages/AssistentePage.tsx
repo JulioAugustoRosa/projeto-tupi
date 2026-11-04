@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, FileText, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
+import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, FileText, ChevronRight, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
@@ -72,6 +72,26 @@ const MODELOS = [
 
 const MAX_ARQUIVO_MB = 4;
 
+/** Marcadores que o adapt-compare usa para separar as duas partes da resposta. */
+const MARCA_INICIO = "<<<ATIVIDADE>>>";
+const MARCA_FIM = "<<<FIM_ATIVIDADE>>>";
+
+/**
+ * Separa a atividade do estudante das orientações ao professor.
+ * Se o modelo não respeitar os marcadores, tudo vira atividade — é melhor
+ * mostrar demais do que esconder o conteúdo do professor.
+ */
+function separarAdaptacao(texto: string): { atividade: string; orientacao: string } {
+  const t = texto ?? "";
+  const i = t.indexOf(MARCA_INICIO);
+  const f = t.indexOf(MARCA_FIM);
+  if (i === -1 || f === -1 || f < i) return { atividade: t.trim(), orientacao: "" };
+  return {
+    atividade: t.slice(i + MARCA_INICIO.length, f).trim(),
+    orientacao: t.slice(f + MARCA_FIM.length).trim(),
+  };
+}
+
 const WELCOME_MSG: Message = {
   id: "welcome",
   role: "assistant",
@@ -122,6 +142,7 @@ const AssistentePage = () => {
   const [exportandoTudo, setExportandoTudo] = useState(false);
   const [folha, setFolha] = useState<Folha | null>(null);
   const [gerandoFolha, setGerandoFolha] = useState<string | null>(null);
+  const [orientacaoAberta, setOrientacaoAberta] = useState<string | null>(null);
   const [exportandoFolha, setExportandoFolha] = useState<string | null>(null);
   const [alunoId, setAlunoId] = useState<string>("");
   const [modelosSel, setModelosSel] = useState<string[]>(MODELOS.map((m) => m.id));
@@ -1131,11 +1152,33 @@ const AssistentePage = () => {
                                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                                 <span>{r.erro}</span>
                               </div>
-                            ) : (
-                              <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-sm prose-a:text-primary">
-                                <ReactMarkdown>{stripPreamble(r.conteudo ?? "")}</ReactMarkdown>
-                              </div>
-                            )}
+                            ) : (() => {
+                              const { atividade, orientacao } = separarAdaptacao(r.conteudo ?? "");
+                              const aberta = orientacaoAberta === msg.id + r.modelo;
+                              return (
+                                <>
+                                  <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-sm prose-a:text-primary">
+                                    <ReactMarkdown>{stripPreamble(atividade)}</ReactMarkdown>
+                                  </div>
+                                  {orientacao && (
+                                    <div className="mt-3 pt-3 border-t border-dashed border-border">
+                                      <button
+                                        onClick={() => setOrientacaoAberta(aberta ? null : msg.id + r.modelo)}
+                                        className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                                      >
+                                        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${aberta ? "rotate-90" : ""}`} />
+                                        {aberta ? "Ocultar" : "Ver"} orientações ao professor
+                                      </button>
+                                      {aberta && (
+                                        <div className="mt-2 rounded-lg bg-muted/50 p-3 prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-xs prose-headings:uppercase prose-headings:tracking-wide prose-headings:text-muted-foreground">
+                                          <ReactMarkdown>{orientacao}</ReactMarkdown>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                           {!r.erro && (
                             <div className="px-3 py-2 border-t border-border">
@@ -1144,7 +1187,12 @@ const AssistentePage = () => {
                                 className="h-8 w-full text-xs"
                                 disabled={!!gerandoFolha}
                                 onClick={() =>
-                                  gerarFolha(msg.id + r.modelo, msg.alunoId ?? "", r.conteudo ?? "", msg)
+                                  gerarFolha(
+                                    msg.id + r.modelo,
+                                    msg.alunoId ?? "",
+                                    separarAdaptacao(r.conteudo ?? "").atividade,
+                                    msg,
+                                  )
                                 }
                               >
                                 {gerandoFolha === msg.id + r.modelo ? (
