@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
+import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, FileText, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
@@ -19,6 +19,14 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { folhaParaDocx, folhaHtmlCompleto, paginaHtml, type Folha } from "@/lib/folha";
 import {
   Select,
   SelectContent,
@@ -42,11 +50,13 @@ interface Message {
   /** Quando preenchido, a mensagem é uma comparação lado a lado entre modelos. */
   comparacao?: ResultadoModelo[];
   alunoNome?: string;
+  alunoId?: string;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 const DOC_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-document`;
 const COMPARE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/adapt-compare`;
+const FOLHA_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gerar-folha`;
 
 /** Espelha a lista fixa validada no servidor (supabase/functions/adapt-compare). */
 const MODELOS = [
@@ -105,6 +115,9 @@ const AssistentePage = () => {
   const [attachments, setAttachments] = useState<{ file: File; preview?: string }[]>([]);
   // Modo adaptação: com um aluno selecionado, a mensagem vira uma comparação entre modelos.
   const [exportandoTudo, setExportandoTudo] = useState(false);
+  const [folha, setFolha] = useState<Folha | null>(null);
+  const [gerandoFolha, setGerandoFolha] = useState<string | null>(null);
+  const [exportandoFolha, setExportandoFolha] = useState<string | null>(null);
   const [alunoId, setAlunoId] = useState<string>("");
   const [modelosSel, setModelosSel] = useState<string[]>(MODELOS.map((m) => m.id));
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -297,6 +310,7 @@ const AssistentePage = () => {
         content: `Adaptação para **${result.aluno ?? nomeAluno}** — ${resultados.length} modelo(s).`,
         comparacao: resultados,
         alunoNome: result.aluno ?? nomeAluno,
+        alunoId,
       };
       setMessages((prev) => [...prev, compMsg]);
 
@@ -678,6 +692,96 @@ const AssistentePage = () => {
   };
 
   // ---------------------------------------------------------------------
+  // Folha de atividade: o layout é decidido pelo perfil do aluno
+  // ---------------------------------------------------------------------
+
+  const gerarFolha = async (chaveBotao: string, alunoDaFolha: string, conteudo: string) => {
+    setGerandoFolha(chaveBotao);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const resp = await fetch(FOLHA_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionData?.session?.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ aluno_id: alunoDaFolha, conteudo, com_imagens: true }),
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
+      setFolha(result as Folha);
+    } catch (e) {
+      toast({ title: "Erro ao gerar a folha", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setGerandoFolha(null);
+    }
+  };
+
+  /** Renderiza uma página fora da tela e devolve o canvas, para PDF e PNG. */
+  const renderizarPagina = async (f: Folha, idx: number): Promise<HTMLCanvasElement> => {
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:-10000px;top:0;background:#fff;";
+    host.innerHTML = paginaHtml(f, idx);
+    document.body.appendChild(host);
+    try {
+      // Espera as imagens embutidas decodificarem antes de capturar.
+      const imgs = Array.from(host.querySelectorAll("img"));
+      await Promise.all(imgs.map((im) =>
+        im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = r; })
+      ));
+      return await html2canvas(host.firstElementChild as HTMLElement, {
+        scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false,
+      });
+    } finally {
+      document.body.removeChild(host);
+    }
+  };
+
+  const nomeBase = (f: Folha) =>
+    `${slug(f.titulo || "atividade")}-${slug(f.aluno || "aluno")}`;
+
+  const exportarFolha = async (formato: "pdf" | "png" | "docx" | "html") => {
+    if (!folha) return;
+    setExportandoFolha(formato);
+    try {
+      const totalPaginas = (folha.paginas ?? []).length || 1;
+
+      if (formato === "docx") {
+        downloadBlob(await folhaParaDocx(folha), `${nomeBase(folha)}.docx`);
+      } else if (formato === "html") {
+        downloadBlob(
+          new Blob([folhaHtmlCompleto(folha)], { type: "text/html;charset=utf-8" }),
+          `${nomeBase(folha)}.html`,
+        );
+      } else if (formato === "png") {
+        for (let i = 0; i < totalPaginas; i++) {
+          const canvas = await renderizarPagina(folha, i);
+          const blob: Blob | null = await new Promise((r) => canvas.toBlob(r, "image/png"));
+          if (blob) {
+            downloadBlob(blob, totalPaginas > 1
+              ? `${nomeBase(folha)}-pagina-${i + 1}.png`
+              : `${nomeBase(folha)}.png`);
+          }
+        }
+      } else {
+        const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+        for (let i = 0; i < totalPaginas; i++) {
+          const canvas = await renderizarPagina(folha, i);
+          if (i > 0) pdf.addPage();
+          pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, 210, 297, undefined, "FAST");
+        }
+        pdf.save(`${nomeBase(folha)}.pdf`);
+      }
+      toast({ title: `Folha exportada (${formato.toUpperCase()})` });
+    } catch (e) {
+      toast({ title: "Erro ao exportar", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setExportandoFolha(null);
+    }
+  };
+
+  // ---------------------------------------------------------------------
   // Exportação de conversas
   // ---------------------------------------------------------------------
 
@@ -829,6 +933,7 @@ const AssistentePage = () => {
   };
 
   return (
+    <>
     <div className="flex h-[calc(100vh-8rem)] gap-4">
       {/* Sidebar de conversas */}
       <aside className="hidden md:flex w-64 shrink-0 flex-col surface-card p-3">
@@ -961,25 +1066,20 @@ const AssistentePage = () => {
                             )}
                           </div>
                           {!r.erro && (
-                            <div className="px-4 py-2 border-t border-border">
+                            <div className="px-3 py-2 border-t border-border">
                               <Button
-                                variant="ghost"
                                 size="sm"
-                                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground w-full justify-start"
-                                disabled={generatingId?.startsWith(msg.id + r.modelo)}
+                                className="h-8 w-full text-xs"
+                                disabled={!!gerandoFolha}
                                 onClick={() =>
-                                  handleExportFor(
-                                    { id: msg.id + r.modelo, role: "assistant", content: r.conteudo ?? "" },
-                                    "pdf",
-                                  )
+                                  gerarFolha(msg.id + r.modelo, msg.alunoId ?? "", r.conteudo ?? "")
                                 }
                               >
-                                {generatingId?.startsWith(msg.id + r.modelo) ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                {gerandoFolha === msg.id + r.modelo ? (
+                                  <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Montando a folha...</>
                                 ) : (
-                                  <span className="mr-1">📄</span>
+                                  <><FileText className="h-3.5 w-3.5 mr-1" /> Gerar folha para imprimir</>
                                 )}
-                                Salvar esta versão em PDF
                               </Button>
                             </div>
                           )}
@@ -1203,6 +1303,75 @@ const AssistentePage = () => {
         </div>
       </div>
     </div>
+
+      {/* Folha de atividade pronta para imprimir */}
+      <Dialog open={!!folha} onOpenChange={(o) => !o && setFolha(null)}>
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">
+              {folha?.titulo || "Folha de atividade"}
+            </DialogTitle>
+            <DialogDescription>
+              Adaptada para {folha?.aluno} · {(folha?.paginas ?? []).length} página(s)
+            </DialogDescription>
+          </DialogHeader>
+
+          {(folha?.adaptacoes_aplicadas ?? []).length > 0 && (
+            <div className="rounded-xl border border-border bg-muted/40 p-4">
+              <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                O que foi adaptado no layout, e por quê
+              </p>
+              <ul className="space-y-1">
+                {folha!.adaptacoes_aplicadas!.map((a, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex gap-2">
+                    <span className="text-primary">•</span><span>{a}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            {([
+              ["pdf", "PDF"],
+              ["docx", "Word (.docx)"],
+              ["png", "PNG"],
+              ["html", "HTML"],
+            ] as const).map(([f, rotulo]) => (
+              <Button
+                key={f}
+                variant={f === "pdf" ? "default" : "outline"}
+                size="sm"
+                disabled={!!exportandoFolha}
+                onClick={() => exportarFolha(f)}
+              >
+                {exportandoFolha === f
+                  ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  : <Download className="h-4 w-4 mr-1" />}
+                {rotulo}
+              </Button>
+            ))}
+          </div>
+
+          {/* Pré-visualização de cada página, reduzida para caber */}
+          <div className="space-y-6 bg-muted/30 rounded-xl p-4">
+            {(folha?.paginas ?? []).map((_, i) => (
+              <div key={i}>
+                <p className="text-[11px] text-muted-foreground mb-1.5">
+                  Página {i + 1} de {(folha?.paginas ?? []).length}
+                </p>
+                <div className="overflow-hidden rounded-lg border border-border bg-white shadow-sm"
+                     style={{ width: 556, height: 786 }}>
+                  <div style={{ transform: "scale(0.7)", transformOrigin: "top left" }}
+                       dangerouslySetInnerHTML={{ __html: paginaHtml(folha!, i) }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 

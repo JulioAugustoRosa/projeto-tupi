@@ -13,3 +13,7 @@ verify_jwt = false
 # antes de executar, e a função confere o usuário de novo com getUser().
 [functions.adapt-compare]
 verify_jwt = true
+
+# Gera a folha de atividade estruturada (layout definido pelo perfil do aluno).
+[functions.gerar-folha]
+verify_jwt = true
