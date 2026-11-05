@@ -23,7 +23,7 @@ const TIMEOUT_MS = 60_000;
 const MAX_IMAGENS = 18;
 const MAX_ANEXOS = 2;
 const MAX_ANEXO_BYTES = 4_000_000;
-const MAX_PAGINAS = 8;
+const MAX_PAGINAS = 4;  // folha densa: o certo é caber em 1 ou 2
 
 const ORIGENS_PERMITIDAS = [
   "https://tupi-adp.vercel.app",
@@ -51,30 +51,26 @@ interface PaginaBruta {
 // Esquema que o modelo deve devolver
 // ---------------------------------------------------------------------------
 const ESQUEMA = `{
-  "titulo": "título curto da atividade",
+  "titulo": "título curto, 2 a 5 palavras",
   "disciplina": "disciplina ou tema",
-  "adaptacoes_aplicadas": ["frase curta explicando CADA decisão de layout ligada ao perfil"],
-  "config": {
-    "fonte": "Lexend | Verdana | Arial",
-    "tamanho_pt": 12,
-    "espacamento": 1.5,
-    "itens_por_pagina": 3,
-    "repetir_material": true
-  },
-  "legenda_material": "rótulo curto do material anexado, ex: 'Tirinha da Turma da Mônica'",
+  "adaptacoes_aplicadas": ["uma frase por decisão de layout, ligada ao perfil"],
+  "config": { "fonte": "Lexend", "tamanho_pt": 14, "espacamento": 1.4, "repetir_material": false },
+  "legenda_material": "",
   "paginas": [
     {
-      "instrucoes": "1 ou 2 frases curtas dizendo ao aluno o que fazer nesta página",
+      "instrucoes": "UMA frase curta de comando, no máximo 10 palavras",
       "blocos": [
         {
-          "numero": 1,
-          "enunciado": "texto do exercício",
-          "formato": "linhas | caixa | multipla | completar | ligar | desenho",
-          "opcoes": ["só para multipla"],
-          "pares": [{"esquerda":"PALAVRA","imagem_prompt":"descrição em português da figura deste par"}],
-          "linhas": 3,
-          "imagem_prompt": "descrição EM INGLÊS da ilustração, ou vazio"
-        }
+          "formato": "grade",
+          "colunas": 3,
+          "celulas": [
+            { "imagem_prompt": "um gato", "texto": "GA", "texto_depois": "TO", "lacuna": "meio" },
+            { "imagem_prompt": "uma bola", "texto": "BOLA", "lacuna": "nenhuma" },
+            { "texto": "A", "circulo": true, "lacuna": "nenhuma" }
+          ]
+        },
+        { "formato": "legenda", "itens_legenda": [ {"marca":"■","valor":"BO"}, {"marca":"●","valor":"CA"} ] },
+        { "formato": "sequencia", "linhas_sequencia": [ {"marcas":["■","●"]}, {"marcas":["●","▲","★"]} ] }
       ]
     }
   ]
@@ -100,122 +96,76 @@ Não há material anexado: tudo o que o aluno precisa ler deve estar escrito nos
 Deixe "legenda_material" como string vazia e "repetir_material" como false.
 `;
 
-  return `Você monta FOLHAS DE ATIVIDADE IMPRESSAS para educação inclusiva, seguindo o DUA.
+  return `Você monta FOLHAS DE ATIVIDADE IMPRESSAS para alfabetização, no padrão das
+folhas que circulam entre professores: pouca escrita, muita figura, tudo organizado
+em GRADE, com 6 a 12 itens cabendo numa página só.
 
 ${ctx}
 ${sobreMaterial}
+==================================================
+COMO É UMA FOLHA BOA — LEIA ANTES DE TUDO
+==================================================
 
-REGRA CENTRAL — O LAYOUT É UMA ADAPTAÇÃO, NÃO UM DETALHE:
+A folha tem UMA linha de instrução no topo e, embaixo, um ARRANJO VISUAL.
+Nunca uma lista de perguntas empilhadas, uma embaixo da outra.
 
-PONTO DE PARTIDA (use isto quando nada no perfil justificar mudar):
-  fonte "Verdana", tamanho_pt 12, espacamento 1.5, 3 a 5 exercícios por página.
+Você tem três arranjos. Escolha o que serve ao que o professor pediu:
 
-Agora ajuste a partir do perfil acima, e SÓ onde o perfil justificar. Cada desvio do
-ponto de partida precisa de uma razão explícita escrita em "adaptacoes_aplicadas".
-Não aplique uma adaptação de uma condição que o aluno não tem.
+1) "grade" — o mais usado. Células com borda, 2 a 4 colunas, 6 a 12 no total.
+   Cada célula junta FIGURA + PALAVRA + LACUNA. Serve para:
+   - completar sílaba: figura do domino, texto "", texto_depois "MINÓ", lacuna "antes"
+   - completar no meio: figura do sapato, texto "SA", texto_depois "TO", lacuna "meio"
+   - completar no fim: figura do saco, texto "SACO", lacuna "depois"
+   - só reconhecer: figura + palavra inteira, lacuna "nenhuma"
+   - letra em destaque: texto "A", circulo true, para servir de cabeçalho visual
 
-- Sobrecarga com muita informação, TDAH, dificuldade de atenção sustentada, ou
-  deficiência intelectual: POUCOS itens por página (1 ou 2), distribuídos em MAIS
-  páginas. Menos densidade por página é a adaptação.
-- Dislexia, ou dificuldade de leitura/decodificação: fonte "Lexend", tamanho_pt >= 16,
-  espacamento >= 1.8, enunciados curtos.
-- Em processo de alfabetização, fase silábica, ou leitura ainda não fluente (em qualquer
-  idade): fonte "Lexend", tamanho_pt >= 16, espacamento >= 1.8, enunciados muito curtos e
-  apoio visual. Letra pequena inviabiliza a decodificação de quem ainda está aprendendo a ler.
-- Discalculia: apoio visual e enunciados contextualizados; evite muitas contas juntas.
-- Deficiência visual ou baixa visão: tamanho_pt >= 18 e alto contraste.
-- Coordenação motora fina prejudicada: "linhas" com mais espaço (linhas >= 3) e caixas
-  maiores.
-- Responde melhor por desenho ou oralidade: inclua blocos "desenho".
+2) "legenda" + "sequencia" — o "código secreto". Primeiro um bloco "legenda"
+   ligando marcas a sílabas, depois um bloco "sequencia" com as combinações a
+   decifrar. Use marcas geométricas: ■ ● ▲ ★ ◆ ♥ ⬟ ➡ ⬅ ⬆ ⬇ ☁ ⬢ ✚
+   A legenda vem SEMPRE antes da sequência, e toda marca usada na sequência
+   precisa estar na legenda.
 
-ATENÇÃO — ADAPTAR NÃO É SEMPRE SIMPLIFICAR:
-- Altas habilidades, superdotação, ou nível de aprendizagem acima da média: vá na
-  direção OPOSTA. MAIS densidade (4 a 6 itens por página), MENOS páginas, enunciados
-  que exigem análise, justificativa ou generalização, e pelo menos um item de
-  aprofundamento. Para esse aluno, uma folha fácil e espaçada é desmotivante.
-  Mantenha tamanho_pt 12 e espacamento 1.5, a menos que haja também uma questão de
-  leitura ou visão.
-- TEA sem dificuldade de leitura: o que costuma ajudar é previsibilidade e instrução
-  literal e sem ambiguidade, não fonte grande nem menos itens.
-- Um aluno pode ter duas coisas ao mesmo tempo (ex.: TEA + altas habilidades). Nesse
-  caso combine: instrução literal e previsível, com conteúdo desafiador.
+3) "ligar" — palavras de um lado, figuras do outro, 3 ou 4 pares embaralhados.
 
-HIPERFOCOS E INTERESSES:
-Se houver hiperfocos ou interesses registrados, AMBIENTE os enunciados nesses temas
-(personagens, contextos), sem mudar o conteúdo pedagógico nem o nível de exigência.
+Os formatos antigos ("linhas", "caixa", "multipla", "desenho") ainda existem, mas
+são o ÚLTIMO recurso: eles geram folha vazia e feia. Prefira sempre grade.
 
-ATIVIDADE DO ESTUDANTE, JÁ ADAPTADA E PRONTA:
-O texto abaixo já é a atividade que o estudante vai receber, com os enunciados escritos.
-Seu trabalho aqui é SÓ DIAGRAMAR: transformar isso em páginas e blocos.
-- PRESERVE os enunciados como estão. Reescreva apenas o mínimo para caber no formato.
-- NÃO invente exercícios novos, nem remova exercícios existentes.
-- Cada exercício do texto vira um bloco, com o "formato" adequado ao tipo de resposta
-  que o enunciado pede (linhas, caixa, multipla, completar, ligar, desenho).
-- As ilustrações já foram separadas do texto e serão coladas nos blocos na ordem em
-  que você criá-los. Por isso: MANTENHA A ORDEM DOS EXERCÍCIOS do texto e crie UM
-  BLOCO POR EXERCÍCIO. Não junte dois exercícios num bloco nem inverta a ordem, ou a
-  figura cai no exercício errado. Deixe "imagem_prompt" vazio: ele é preenchido depois.
+==================================================
+REGRAS DE OURO
+==================================================
 
-O QUE NÃO É EXERCÍCIO (erros comuns, evite):
-- Frases de comando geral ("Olhe as figuras", "Leia junto com o professor", "Agora vamos
-  escrever") são INSTRUÇÕES: vão no campo "instrucoes" da página, nunca como bloco com
-  espaço de resposta.
-- Títulos de seção ("Parte 1", "Vamos tentar com BOLA:") não são exercícios. Junte o
-  título ao exercício que ele introduz, num bloco só.
-- Um exemplo resolvido que o texto traz ("Exemplo: BO - LA") entra dentro do enunciado
-  do primeiro exercício, não vira bloco separado.
-- Não quebre um exercício em vários blocos. Uma pergunta com itens a, b, c é UM bloco.
-- Itens repetidos do MESMO comando viram UM bloco só, com a lista dentro. Se a atividade
-  pede para formar BOLA, GOL e TIME a partir das sílabas, isso é um bloco com três itens,
-  não três blocos nem três páginas.
+- DENSIDADE: 6 a 12 itens por página. Uma página com 1 ou 2 exercícios está ERRADA.
+  Antes de criar uma página nova, encha a atual.
+- UMA instrução por página, com no máximo 10 palavras, no imperativo:
+  "Complete as palavras." "Pinte as figuras com A." "Descubra o código."
+- NADA de enunciado por item. Na grade, a célula não tem pergunta: a instrução
+  do topo já diz o que fazer em todas.
+- PALAVRAS EM CAIXA ALTA, que é o padrão da alfabetização.
+- "imagem_prompt" é um OBJETO CONCRETO em até 5 palavras, em português.
+  NUNCA peça desenho de letra, sílaba ou palavra escrita: sai ilegível.
+  Toda célula da grade deveria ter figura, a menos que ela seja só uma letra.
+- Use as palavras e os temas que o PROFESSOR pediu. O hiperfoco do aluno entra na
+  escolha das palavras e das figuras, nunca mudando o conteúdo que foi pedido.
 
-EXERCÍCIO DE LIGAR — REGRAS RÍGIDAS:
-- Use "formato":"ligar" SOMENTE com 3 ou 4 pares. Ligar uma coisa a uma coisa só não é
-  exercício: se houver apenas uma palavra e uma figura, use "circular" ou "pintar".
-- Cada par tem "esquerda" (a PALAVRA, em caixa alta) e "imagem_prompt" (a figura que
-  vai do lado direito). Deixe "direita" vazio quando houver figura.
-- EMBARALHE: a ordem das figuras não pode ser a mesma das palavras, senão basta ligar
-  na horizontal sem ler.
-- Um bloco "ligar" não usa o "imagem_prompt" do bloco; as figuras ficam nos pares.
-
-NUNCA PEÇA FIGURA DE LETRA OU SÍLABA:
-"imagem_prompt" é sempre um OBJETO CONCRETO (gato, casa, bola). Não peça desenho de
-letras, sílabas ou palavras escritas — o desenho sai ilegível e o estilo proíbe texto.
-Para trabalhar a sílaba, escreva-a no enunciado e ilustre com o objeto correspondente.
-
-CADA BLOCO PRECISA TER ONDE RESPONDER:
-Nunca produza um bloco que seja só uma frase solta. Se o aluno tem que escrever algo,
-o bloco precisa de "formato" e, no caso de "completar", de lacunas visíveis no próprio
-enunciado (underscores). "Forme a palavra com BO - LA" sem lacuna nenhuma é uma folha
-onde o aluno não tem onde escrever.
-
-SEPARAÇÃO SILÁBICA — SÓ SE ESTIVER CERTA:
-Não invente divisões. Palavras de uma sílaba só (GOL, PÃO, SOL, MAR) NÃO se separam:
-"GO - L" está errado. Na dúvida, não separe e use outro tipo de exercício.
+==================================================
+O QUE O PROFESSOR PEDIU
+==================================================
 
 ${conteudo}
 
-REGRAS DE PREENCHIMENTO:
-0. ENUNCIADO CURTO: no máximo 8 palavras por bloco. Se o texto de entrada trouxe um
-   enunciado longo, encurte mantendo o comando. O estudante está aprendendo a ler.
-1. NUNCA altere o conteúdo pedagógico. Só a forma de apresentar.
-2. Em "adaptacoes_aplicadas", escreva uma frase por decisão, ligando ao perfil.
-   Ex: "3 páginas com 1 exercício cada, porque o aluno se sobrecarrega com muita informação".
-3. "itens_por_pagina" deve bater com o número real de blocos em cada página.
-4. Em "completar", use underscores contínuos SEM espaços: "b_l_" certo, "b _ l _" errado.
-5. "imagem_prompt" em QUASE TODO bloco — esta é uma folha de alfabetização, o apoio
-   visual é o conteúdo principal. No máximo ${MAX_IMAGENS} no total.
-   Escreva em inglês, descrevendo UM objeto concreto isolado, e termine sempre com:
-   "thick black outline coloring book style, flat white background, no text, no letters,
-   no shading, centered, simple children worksheet clip art".
-   Nada de cena complexa, pessoa realista, fundo ou sombra: é desenho de contorno para
-   criança em alfabetização reconhecer de imediato.
-6. Responda em português brasileiro nos textos voltados ao aluno.
-7. Entre 1 e 8 páginas. Páginas existem para distribuir EXERCÍCIOS REAIS: se a atividade
-   tem 5 exercícios, ela não pode virar 9 páginas. Conte os exercícios do texto antes de
-   decidir quantas páginas usar.
+Transforme isso numa folha com os arranjos acima. Preserve o conteúdo pedido:
+as mesmas palavras, as mesmas sílabas, o mesmo objetivo. O que você decide é a
+APRESENTAÇÃO.
 
-Responda APENAS com um JSON válido neste formato, sem markdown e sem cercas de código:
+REGRAS DE PREENCHIMENTO:
+1. Entre 1 e 3 páginas. Só crie a segunda se a primeira estiver cheia.
+2. "colunas": 3 é o padrão; 2 se as palavras forem longas; 4 se forem curtas.
+3. "adaptacoes_aplicadas": uma frase por decisão, ligada ao perfil do estudante.
+4. "fonte" aceita exatamente um destes nomes, sem barras nem alternativas:
+   "Lexend" (quem ainda não lê com fluência) ou "Verdana" (os demais).
+4. Responda em português brasileiro nos textos voltados ao aluno.
+
+Responda APENAS com um JSON válido neste formato, sem markdown e sem cercas:
 ${ESQUEMA}`;
 }
 
@@ -505,9 +455,11 @@ serve(async (req) => {
       // que veio da adaptação, que conhece o perfil; e, na falta dela, uma derivada
       // do próprio enunciado, que ao menos fala do que o exercício trata.
       blocos.forEach((b, i) => {
-        const temPares = Array.isArray((b as { pares?: unknown[] }).pares) &&
-          ((b as { pares: unknown[] }).pares.length > 0);
-        if (temPares) { delete b.imagem_prompt; return; }
+        const comp = b as { pares?: unknown[]; celulas?: unknown[] };
+        const temFilhos = (Array.isArray(comp.pares) && comp.pares.length > 0) ||
+          (Array.isArray(comp.celulas) && comp.celulas.length > 0);
+        // Grade e ligar têm figuras próprias, uma por célula/par.
+        if (temFilhos) { delete b.imagem_prompt; return; }
         if (i < descImagens.length) {
           b.imagem_prompt = descImagens[i];
         } else {
@@ -521,14 +473,28 @@ serve(async (req) => {
       console.log(`ilustrações: ${descImagens.length} do texto, ${Math.max(0, blocos.length - descImagens.length)} derivadas do enunciado`);
     }
 
+    // O modelo chegou a copiar o exemplo do esquema literalmente e devolveu a fonte
+    // como "Lexend | Verdana", que não existe em lugar nenhum — o Word caiu numa
+    // serifada e a adaptação de leitura foi perdida. Normalizamos aqui.
+    {
+      const cfg = (folha.config ?? {}) as Record<string, unknown>;
+      const bruta = String(cfg.fonte ?? "").toLowerCase();
+      cfg.fonte = bruta.includes("lexend") ? "Lexend" : "Verdana";
+      folha.config = cfg;
+    }
+
     // Renumeração sequencial em toda a folha. O modelo costuma reiniciar a
     // contagem a cada página ou repetir o mesmo número, e o renderizador tira a
     // numeração que vem dentro do enunciado para não duplicar — então o número
     // correto tem que sair daqui.
     {
       let n = 0;
+      const SEM_NUMERO = new Set(["grade", "legenda", "sequencia"]);
       for (const p of ((folha.paginas ?? []) as PaginaBruta[])) {
-        for (const b of (p.blocos ?? []) as { numero?: number }[]) {
+        for (const b of (p.blocos ?? []) as { numero?: number; formato?: string }[]) {
+          // A grade e a legenda são arranjos da página inteira, não "o exercício 3":
+          // uma bolinha numerada ao lado delas só polui.
+          if (SEM_NUMERO.has(b.formato ?? "")) { delete b.numero; continue; }
           b.numero = ++n;
         }
       }
@@ -537,14 +503,16 @@ serve(async (req) => {
     // Ilustrações embutidas em base64
     if (com_imagens !== false) {
       const paginas = (folha.paginas ?? []) as { blocos?: { imagem_prompt?: string; imagem?: string }[] }[];
-      const alvos: { imagem_prompt?: string; imagem?: string }[] = [];
+      type Img = { imagem_prompt?: string; imagem?: string };
+      const alvos: Img[] = [];
       for (const pag of paginas) {
         for (const b of pag.blocos ?? []) {
           // Num bloco "ligar", as figuras ficam nos pares, não no bloco.
-          const pares = (b as { pares?: { imagem_prompt?: string; imagem?: string }[] }).pares;
-          if (Array.isArray(pares) && pares.length > 0) {
-            for (const par of pares) {
-              if (par?.imagem_prompt && alvos.length < MAX_IMAGENS) alvos.push(par);
+          const sub = (b as { pares?: Img[]; celulas?: Img[] });
+          const filhosImg = [...(sub.celulas ?? []), ...(sub.pares ?? [])];
+          if (filhosImg.length > 0) {
+            for (const f of filhosImg) {
+              if (f?.imagem_prompt && alvos.length < MAX_IMAGENS) alvos.push(f);
             }
             continue;
           }

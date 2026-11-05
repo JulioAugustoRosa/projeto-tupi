@@ -7,10 +7,48 @@ import {
   WidthType,
 } from "docx";
 
+/** Uma célula da grade: figura, palavra e lacuna convivem na mesma caixa. */
+export interface CelulaFolha {
+  /** data: URL, preenchida pelo servidor */
+  imagem?: string;
+  imagem_prompt?: string;
+  /** texto antes da lacuna (ou o texto inteiro, se não houver lacuna) */
+  texto?: string;
+  /** texto depois da lacuna, para casos como SA [ ] TO */
+  texto_depois?: string;
+  /** onde entra o quadrinho vazio dentro da célula */
+  lacuna?: "antes" | "depois" | "meio" | "nenhuma";
+  /** desenha o texto dentro de um círculo grosso, como nas folhas de alfabeto */
+  circulo?: boolean;
+}
+
+/** Um par da legenda: a marca que aparece, e o que ela significa. */
+export interface ItemLegenda {
+  marca: string;
+  valor: string;
+}
+
+/** Uma linha do código secreto: marcas a decifrar e quantas caixas preencher. */
+export interface LinhaSequencia {
+  marcas: string[];
+}
+
 export interface BlocoFolha {
   numero?: number;
   enunciado: string;
-  formato?: "linhas" | "caixa" | "multipla" | "completar" | "ligar" | "desenho";
+  formato?:
+    | "linhas" | "caixa" | "multipla" | "completar" | "ligar" | "desenho"
+    /** grade de células com borda: figura + palavra + lacuna */
+    | "grade"
+    /** caixa de legenda: marca → valor */
+    | "legenda"
+    /** código secreto: linhas de marcas com caixas para escrever */
+    | "sequencia";
+  /** grade: quantas colunas (2 a 4) */
+  colunas?: number;
+  celulas?: CelulaFolha[];
+  itens_legenda?: ItemLegenda[];
+  linhas_sequencia?: LinhaSequencia[];
   opcoes?: string[];
   /**
    * Pares do exercício de ligar. `direita` pode ser texto ou, quando o par tem
@@ -81,6 +119,43 @@ function limparEnunciado(txt: string, temNumero: boolean): string {
   return t.replace(/[ \t]{2,}/g, " ").trim();
 }
 
+/** Quadrinho vazio onde o aluno escreve a sílaba ou a letra que falta. */
+const lacunaHtml = (pt: number) =>
+  `<span style="display:inline-block;min-width:${pt * 3.4}px;height:${pt * 3.4}px;border:2.5px solid #333;border-radius:4px;vertical-align:middle;margin:0 4px;"></span>`;
+
+/** Uma célula da grade: figura em cima, palavra embaixo, lacuna na posição pedida. */
+function celulaHtml(c: CelulaFolha, pt: number): string {
+  const img = c.imagem
+    ? `<img src="${c.imagem}" alt="" style="display:block;margin:0 auto ${pt * 0.7}px;max-width:100%;max-height:${pt * 11}px;object-fit:contain;" />`
+    : "";
+
+  const texto = esc(c.texto ?? "");
+  const depois = esc(c.texto_depois ?? "");
+  const lac = lacunaHtml(pt);
+  // texto e texto_depois são as partes ANTES e DEPOIS da lacuna. O modelo nem sempre
+  // usa o campo que a gente espera: com a lacuna no início ele deixa "texto" vazio e
+  // põe a palavra toda em "texto_depois". Montar pelas partes evita perder a palavra.
+  let linha: string;
+  switch (c.lacuna) {
+    case "antes":  linha = `${lac}${texto}${depois}`; break;
+    case "meio":   linha = `${texto}${lac}${depois}`; break;
+    case "depois": linha = `${texto}${depois}${lac}`; break;
+    default:       linha = `${texto}${depois}`;
+  }
+
+  const estiloTexto = c.circulo
+    ? `display:inline-flex;align-items:center;justify-content:center;width:${pt * 4.4}px;height:${pt * 4.4}px;border:3px solid #333;border-radius:999px;font-weight:800;font-size:${pt * 1.6}pt;`
+    : `font-weight:800;font-size:${pt * 1.25}pt;letter-spacing:1px;`;
+
+  const conteudo = (texto || depois || c.lacuna)
+    ? `<div style="text-align:center;"><span style="${estiloTexto}">${linha}</span></div>`
+    : "";
+
+  return `<div style="border:2px solid #333;border-radius:6px;padding:${pt}px ${pt * 0.6}px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:${pt * 0.4}px;min-height:${pt * 13}px;">
+    ${img}${conteudo}
+  </div>`;
+}
+
 function blocoHtml(b: BlocoFolha, pt: number): string {
   const num = b.numero != null
     ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:${pt * 2}px;height:${pt * 2}px;border-radius:999px;background:#E95A3A;color:#fff;font-weight:700;margin-right:10px;flex:none;">${esc(b.numero)}</span>`
@@ -100,6 +175,46 @@ function blocoHtml(b: BlocoFolha, pt: number): string {
         ).join("")
       }</div>`;
       break;
+    case "grade": {
+      const cels = b.celulas ?? [];
+      if (cels.length === 0) { resposta = ""; break; }
+      const cols = Math.min(4, Math.max(2, b.colunas ?? 3));
+      resposta = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${pt * 1.1}px;margin-top:${pt}px;">
+        ${cels.map((c) => celulaHtml(c, pt)).join("")}
+      </div>`;
+      break;
+    }
+
+    case "legenda": {
+      const itens = b.itens_legenda ?? [];
+      if (itens.length === 0) { resposta = ""; break; }
+      const cols = Math.min(6, Math.max(3, Math.ceil(itens.length / 2)));
+      resposta = `<div style="border:2.5px solid #333;border-radius:14px;padding:${pt}px ${pt * 1.2}px;margin-top:${pt}px;
+          display:grid;grid-template-columns:repeat(${cols},1fr);gap:${pt * 0.8}px ${pt}px;justify-items:center;">
+        ${itens.map((i) => `<div style="text-align:center;line-height:1.15;">
+            <div style="font-size:${pt * 1.5}pt;">${esc(i.marca)}</div>
+            <div style="font-weight:800;font-size:${pt * 1.1}pt;letter-spacing:1px;">${esc(i.valor)}</div>
+          </div>`).join("")}
+      </div>`;
+      break;
+    }
+
+    case "sequencia": {
+      const seqs = (b.linhas_sequencia ?? []).filter((l) => (l?.marcas ?? []).length > 0);
+      if (seqs.length === 0) { resposta = ""; break; }
+      resposta = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:${pt * 1.6}px ${pt * 2.4}px;margin-top:${pt * 1.2}px;">
+        ${seqs.map((l) => `<div style="text-align:center;">
+            <div style="display:flex;justify-content:center;gap:${pt * 1.2}px;font-size:${pt * 1.6}pt;margin-bottom:${pt * 0.5}px;">
+              ${l.marcas.map((m) => `<span>${esc(m)}</span>`).join("")}
+            </div>
+            <div style="display:flex;justify-content:center;gap:${pt * 0.5}px;">
+              ${l.marcas.map(() => `<span style="display:inline-block;width:${pt * 3.6}px;height:${pt * 3.2}px;border:2.5px solid #333;border-radius:4px;"></span>`).join("")}
+            </div>
+          </div>`).join("")}
+      </div>`;
+      break;
+    }
+
     case "ligar": {
       const pares = (b.pares ?? []).filter((p) => p?.esquerda);
       // Um par sozinho não é exercício de ligar, e um lado direito vazio deixava
@@ -309,6 +424,38 @@ function caixaResposta(alturaTwips: number, tracejada: boolean): Table {
   });
 }
 
+/** Conteúdo de uma célula da grade no Word: figura em cima, palavra embaixo. */
+function celulaDocx(c: CelulaFolha, half: number, fonte: string): Paragraph[] {
+  const saida: Paragraph[] = [];
+  if (c.imagem) {
+    try {
+      saida.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new ImageRun({
+          data: dataUrlParaBytes(c.imagem),
+          type: tipoImagem(c.imagem),
+          transformation: { width: 95, height: 95 },
+        })],
+      }));
+    } catch { /* imagem inválida: a célula segue sem ela */ }
+  }
+  const vazio = "____";
+  const t = c.texto ?? "";
+  const d = c.texto_depois ?? "";
+  let linha = `${t}${d}`;
+  if (c.lacuna === "antes") linha = `${vazio} ${t}${d}`;
+  else if (c.lacuna === "meio") linha = `${t} ${vazio} ${d}`;
+  else if (c.lacuna === "depois") linha = `${t}${d} ${vazio}`;
+  if (linha.trim()) {
+    saida.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: linha, bold: true, size: Math.round(half * 1.15), font: fonte })],
+    }));
+  }
+  if (saida.length === 0) saida.push(new Paragraph({ children: [new TextRun({ text: " " })] }));
+  return saida;
+}
+
 export async function folhaParaDocx(folha: Folha): Promise<Blob> {
   const cfg = folha.config ?? {};
   const pt = cfg.tamanho_pt ?? 12;
@@ -412,6 +559,75 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
             spacing: { after: 90, line: linhaEspaco },
           })));
           break;
+        case "grade": {
+          const cels = b.celulas ?? [];
+          if (cels.length === 0) break;
+          const cols = Math.min(4, Math.max(2, b.colunas ?? 3));
+          const linhasGrade: TableRow[] = [];
+          for (let i = 0; i < cels.length; i += cols) {
+            const grupo = cels.slice(i, i + cols);
+            while (grupo.length < cols) grupo.push({});
+            linhasGrade.push(new TableRow({
+              children: grupo.map((c) => new TableCell({
+                verticalAlign: VerticalAlign.CENTER,
+                margins: { top: 120, bottom: 120, left: 120, right: 120 },
+                children: celulaDocx(c, half, fonte),
+              })),
+            }));
+          }
+          filhos.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: linhasGrade }));
+          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
+          break;
+        }
+        case "legenda": {
+          const itens = b.itens_legenda ?? [];
+          if (itens.length === 0) break;
+          const cols = Math.min(6, Math.max(3, Math.ceil(itens.length / 2)));
+          const linhasLeg: TableRow[] = [];
+          for (let i = 0; i < itens.length; i += cols) {
+            const grupo = itens.slice(i, i + cols);
+            linhasLeg.push(new TableRow({
+              children: grupo.map((it) => new TableCell({
+                verticalAlign: VerticalAlign.CENTER,
+                margins: { top: 80, bottom: 80, left: 80, right: 80 },
+                children: [
+                  new Paragraph({ alignment: AlignmentType.CENTER,
+                    children: [new TextRun({ text: it.marca, size: Math.round(half * 1.4), font: fonte })] }),
+                  new Paragraph({ alignment: AlignmentType.CENTER,
+                    children: [new TextRun({ text: it.valor, bold: true, size: half, font: fonte })] }),
+                ],
+              })),
+            }));
+          }
+          filhos.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: linhasLeg }));
+          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 280 } }));
+          break;
+        }
+        case "sequencia": {
+          const seqs = (b.linhas_sequencia ?? []).filter((l) => (l?.marcas ?? []).length > 0);
+          if (seqs.length === 0) break;
+          for (const l of seqs) {
+            filhos.push(new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new TextRun({ text: l.marcas.join("   "), size: Math.round(half * 1.5), font: fonte })],
+              spacing: { before: 200, after: 60 },
+            }));
+            // Uma caixa por marca, para o aluno escrever a sílaba decifrada
+            filhos.push(new Table({
+              width: { size: Math.min(100, l.marcas.length * 22), type: WidthType.PERCENTAGE },
+              alignment: AlignmentType.CENTER,
+              rows: [new TableRow({
+                height: { value: 560, rule: "atLeast" },
+                children: l.marcas.map(() => new TableCell({
+                  verticalAlign: VerticalAlign.CENTER,
+                  children: [new Paragraph({ children: [new TextRun({ text: " " })] })],
+                })),
+              })],
+            }));
+            filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 160 } }));
+          }
+          break;
+        }
         case "ligar": {
           const pares = (b.pares ?? []).filter((p) => p?.esquerda);
           const utilizavel = pares.length >= 2 && pares.some((p) => p.imagem || p.direita);
