@@ -6,12 +6,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-const MODELO = "google/gemini-2.5-flash-lite";
-const MAX_TOKENS = 6000;
+// A diagramação era o elo fraco: num modelo "lite" ela explodia 5 exercícios em
+// 10 páginas, reescrevia enunciados prontos, descartava as ilustrações e mandava
+// um par só nos exercícios de ligar. Exige obediência estrutural, não criatividade.
+const MODELO = "openai/gpt-5-mini";
+// Raciocínio é obrigatório nesta família e os tokens dele saem do mesmo teto:
+// sem baixar o esforço, o modelo gasta o orçamento pensando e devolve JSON vazio.
+const RACIOCINIO = { effort: "low" };
+const MAX_TOKENS = 12000;
 const MAX_CONTEUDO = 12000;
 const LIMITE_DIARIO = 200;       // compartilhado com adapt-compare
 const TIMEOUT_MS = 60_000;
-const MAX_IMAGENS = 10;  // folha de alfabetização é quase toda imagem
+// Um bloco "ligar" sozinho consome 3 ilustrações, então o teto antigo de 10 se
+// esgotava antes do fim da folha e exercícios como "pinte o desenho" saíam sem
+// desenho nenhum. São baixadas em paralelo, então subir o teto não soma latência.
+const MAX_IMAGENS = 18;
 const MAX_ANEXOS = 2;
 const MAX_ANEXO_BYTES = 4_000_000;
 const MAX_PAGINAS = 8;
@@ -423,6 +432,7 @@ serve(async (req) => {
           model: MODELO,
           max_tokens: MAX_TOKENS,
           response_format: { type: "json_object" },
+          reasoning: RACIOCINIO,
           messages: [
             { role: "system", content: "Você devolve APENAS JSON válido, sem markdown e sem cercas de código." },
             { role: "user", content: partesUsuario },
