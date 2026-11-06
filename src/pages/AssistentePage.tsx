@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, FileText, ChevronRight, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
+import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, FileText, Eye, ChevronRight, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
@@ -142,6 +142,10 @@ const AssistentePage = () => {
   const [exportandoTudo, setExportandoTudo] = useState(false);
   const [folha, setFolha] = useState<Folha | null>(null);
   const [gerandoFolha, setGerandoFolha] = useState<string | null>(null);
+  // Folhas preparadas em segundo plano, por mensagem+modelo. Ficam só na sessão:
+  // cada uma carrega vários MB de imagem em base64 e não cabe no banco.
+  const [folhasProntas, setFolhasProntas] = useState<Record<string, Folha>>({});
+  const [folhasEmPreparo, setFolhasEmPreparo] = useState<Record<string, boolean>>({});
   const [orientacaoAberta, setOrientacaoAberta] = useState<string | null>(null);
   const [exportandoFolha, setExportandoFolha] = useState<string | null>(null);
   const [alunoId, setAlunoId] = useState<string>("");
@@ -367,6 +371,9 @@ const AssistentePage = () => {
         material,
       };
       setMessages((prev) => [...prev, compMsg]);
+
+      // Em segundo plano: as folhas já ficam prontas enquanto o professor lê.
+      void prepararFolhas(compMsg.id, compMsg, resultados);
 
       // content continua em markdown legível (é ele que vai para a exportação);
       // metadata guarda a estrutura, para a tela remontar os painéis.
@@ -777,33 +784,84 @@ const AssistentePage = () => {
     }
   };
 
-  const gerarFolha = async (
+  /** Chama a edge function e devolve a folha montada. */
+  const pedirFolha = async (
+    alunoDaFolha: string,
+    conteudo: string,
+    msg?: Message,
+  ): Promise<Folha> => {
+    // Na sessão o anexo está em memória; depois de recarregar, vem do storage.
+    let anexos = msg?.anexos;
+    if ((!anexos || anexos.length === 0) && msg?.material) {
+      const recuperado = await materialDoStorage(msg.material);
+      if (recuperado) anexos = [recuperado];
+    }
+    const { data: sessionData } = await supabase.auth.getSession();
+    const resp = await fetch(FOLHA_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionData?.session?.access_token}`,
+        apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+      },
+      body: JSON.stringify({ aluno_id: alunoDaFolha, conteudo, com_imagens: true, anexos: anexos ?? [] }),
+    });
+    const result = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
+    return result as Folha;
+  };
+
+  /**
+   * Prepara as três folhas em segundo plano, assim que as adaptações chegam.
+   * Não bloqueia: o professor já lê os textos enquanto as folhas ficam prontas.
+   */
+  const prepararFolhas = async (msgId: string, msg: Message, resultados: ResultadoModelo[]) => {
+    const validos = resultados.filter((r) => r.conteudo && !r.erro);
+    if (validos.length === 0 || !msg.alunoId) return;
+
+    setFolhasEmPreparo((prev) => {
+      const n = { ...prev };
+      validos.forEach((r) => { n[msgId + r.modelo] = true; });
+      return n;
+    });
+
+    await Promise.all(validos.map(async (r) => {
+      const chave = msgId + r.modelo;
+      try {
+        const f = await pedirFolha(
+          msg.alunoId!,
+          separarAdaptacao(r.conteudo ?? "").atividade,
+          msg,
+        );
+        setFolhasProntas((prev) => ({ ...prev, [chave]: f }));
+      } catch (e) {
+        // Sem alarde: o botão volta a oferecer a geração manual.
+        console.warn(`folha de ${r.nome} falhou:`, (e as Error).message);
+      } finally {
+        setFolhasEmPreparo((prev) => {
+          const n = { ...prev };
+          delete n[chave];
+          return n;
+        });
+      }
+    }));
+  };
+
+  /** Clique no botão: abre a folha pronta ou, em último caso, gera na hora. */
+  const abrirFolha = async (
     chaveBotao: string,
     alunoDaFolha: string,
     conteudo: string,
     msg?: Message,
   ) => {
+    const pronta = folhasProntas[chaveBotao];
+    if (pronta) { setFolha(pronta); return; }
+
     setGerandoFolha(chaveBotao);
     try {
-      // Na sessão o anexo está em memória; depois de recarregar, vem do storage.
-      let anexos = msg?.anexos;
-      if ((!anexos || anexos.length === 0) && msg?.material) {
-        const recuperado = await materialDoStorage(msg.material);
-        if (recuperado) anexos = [recuperado];
-      }
-      const { data: sessionData } = await supabase.auth.getSession();
-      const resp = await fetch(FOLHA_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionData?.session?.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({ aluno_id: alunoDaFolha, conteudo, com_imagens: true, anexos: anexos ?? [] }),
-      });
-      const result = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
-      setFolha(result as Folha);
+      const f = await pedirFolha(alunoDaFolha, conteudo, msg);
+      setFolhasProntas((prev) => ({ ...prev, [chaveBotao]: f }));
+      setFolha(f);
     } catch (e) {
       toast({ title: "Erro ao gerar a folha", description: (e as Error).message, variant: "destructive" });
     } finally {
@@ -1187,9 +1245,10 @@ const AssistentePage = () => {
                               <Button
                                 size="sm"
                                 className="h-8 w-full text-xs"
-                                disabled={!!gerandoFolha}
+                                variant={folhasProntas[msg.id + r.modelo] ? "default" : "outline"}
+                                disabled={!!gerandoFolha || !!folhasEmPreparo[msg.id + r.modelo]}
                                 onClick={() =>
-                                  gerarFolha(
+                                  abrirFolha(
                                     msg.id + r.modelo,
                                     msg.alunoId ?? "",
                                     separarAdaptacao(r.conteudo ?? "").atividade,
@@ -1197,8 +1256,12 @@ const AssistentePage = () => {
                                   )
                                 }
                               >
-                                {gerandoFolha === msg.id + r.modelo ? (
+                                {folhasEmPreparo[msg.id + r.modelo] ? (
+                                  <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Preparando a folha...</>
+                                ) : gerandoFolha === msg.id + r.modelo ? (
                                   <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Montando a folha...</>
+                                ) : folhasProntas[msg.id + r.modelo] ? (
+                                  <><Eye className="h-3.5 w-3.5 mr-1" /> Visualizar folha</>
                                 ) : (
                                   <><FileText className="h-3.5 w-3.5 mr-1" /> Gerar folha para imprimir</>
                                 )}
