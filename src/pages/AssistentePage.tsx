@@ -896,7 +896,7 @@ const AssistentePage = () => {
     if (!folha) return;
     setExportandoFolha(formato);
     try {
-      const totalPaginas = (folha.paginas ?? []).length || 1;
+      const totalPaginas = 1;  // a folha cabe numa página A4
 
       if (formato === "docx") {
         downloadBlob(await folhaParaDocx(folha), `${nomeBase(folha)}.docx`);
@@ -1497,7 +1497,7 @@ const AssistentePage = () => {
               {folha?.titulo || "Folha de atividade"}
             </DialogTitle>
             <DialogDescription>
-              Adaptada para {folha?.aluno} · {(folha?.paginas ?? []).length} página(s)
+              Adaptada para {folha?.aluno} · {(folha?.secoes ?? []).length} seções
             </DialogDescription>
           </DialogHeader>
 
@@ -1539,20 +1539,13 @@ const AssistentePage = () => {
             ))}
           </div>
 
-          {/* Pré-visualização de cada página, reduzida para caber */}
-          <div className="space-y-6 bg-muted/30 rounded-xl p-4">
-            {(folha?.paginas ?? []).map((_, i) => (
-              <div key={i}>
-                <p className="text-[11px] text-muted-foreground mb-1.5">
-                  Página {i + 1} de {(folha?.paginas ?? []).length}
-                </p>
-                <div className="overflow-hidden rounded-lg border border-border bg-white shadow-sm"
-                     style={{ width: 556, height: 786 }}>
-                  <div style={{ transform: "scale(0.7)", transformOrigin: "top left" }}
-                       dangerouslySetInnerHTML={{ __html: paginaHtml(folha!, i) }} />
-                </div>
-              </div>
-            ))}
+          {/* Pré-visualização da folha, reduzida para caber na janela */}
+          <div className="bg-muted/30 rounded-xl p-4">
+            <div className="overflow-hidden rounded-lg border border-border bg-white shadow-sm mx-auto"
+                 style={{ width: 636, height: 899 }}>
+              <div style={{ transform: "scale(0.8)", transformOrigin: "top left" }}
+                   dangerouslySetInnerHTML={{ __html: paginaHtml(folha!) }} />
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -1,746 +1,483 @@
-// Renderiza a folha de atividade estruturada (vinda da edge function gerar-folha)
-// em HTML (preview, PDF e PNG) e em DOCX, a partir da MESMA estrutura.
+// Renderiza a folha de atividade no modelo usado por professora especialista:
+// faixa de disciplina no topo, seções numeradas e coloridas em duas colunas,
+// ícones como âncora visual, escrita guiada por frases começadas e checklist
+// de autoavaliação no fim.
+//
+// A mesma estrutura alimenta a pré-visualização, o PDF, o PNG e o DOCX.
 
 import {
   AlignmentType, BorderStyle, Document, HeadingLevel, ImageRun, Packer,
-  PageBreak, Paragraph, Table, TableCell, TableRow, TextRun, VerticalAlign,
-  WidthType,
+  Paragraph, ShadingType, Table, TableCell, TableRow, TextRun,
+  VerticalAlign, WidthType,
 } from "docx";
 
-/** Uma célula da grade: figura, palavra e lacuna convivem na mesma caixa. */
-export interface CelulaFolha {
-  /** data: URL, preenchida pelo servidor */
+// ---------------------------------------------------------------------------
+// Paleta
+// ---------------------------------------------------------------------------
+
+/**
+ * Tons claros com texto escuro: a cor organiza a folha e ainda sobrevive à
+ * fotocópia em preto e branco, que é como a maioria das escolas imprime.
+ */
+export const PALETA = {
+  azul:    { fundo: "#E8F1FD", borda: "#2563EB", texto: "#14306B" },
+  verde:   { fundo: "#E7F6EC", borda: "#15803D", texto: "#14432A" },
+  roxo:    { fundo: "#F1EAFB", borda: "#7C3AED", texto: "#3B1D70" },
+  amarelo: { fundo: "#FEF6DC", borda: "#D97706", texto: "#6B3F05" },
+  laranja: { fundo: "#FDEDE6", borda: "#E95A3A", texto: "#7A2912" },
+  cinza:   { fundo: "#F3F4F6", borda: "#6B7280", texto: "#1F2937" },
+} as const;
+
+export type NomeCor = keyof typeof PALETA;
+const cor = (c?: string) => PALETA[(c as NomeCor)] ?? PALETA.azul;
+
+const MARINHO = "#17356B";
+
+// ---------------------------------------------------------------------------
+// Estrutura
+// ---------------------------------------------------------------------------
+
+export interface DadoInfo { icone?: string; rotulo: string; valor: string }
+export interface ParRelacionar { rotulo: string; definicao: string; cor?: string }
+export interface PerguntaGuia { icone?: string; pergunta: string }
+export interface CampoProducao { rotulo: string; cor?: string; texto: string }
+
+export interface SecaoFolha {
+  numero?: number;
+  titulo: string;
+  subtitulo?: string;
+  cor?: string;
+  /** "metade" entra na grade de duas colunas; "inteira" ocupa a largura toda */
+  largura?: "metade" | "inteira";
+  tipo: "info" | "relacionar" | "perguntas" | "producao" | "checklist" | "texto";
+
+  /** info */
   imagem?: string;
   imagem_prompt?: string;
-  /** texto antes da lacuna (ou o texto inteiro, se não houver lacuna) */
+  destaque?: string;
+  dados?: DadoInfo[];
+
+  /** relacionar */
+  pares?: ParRelacionar[];
+
+  /** perguntas */
+  perguntas?: PerguntaGuia[];
+
+  /** producao — o texto traz ___ onde o aluno escreve */
+  campos?: CampoProducao[];
+
+  /** checklist */
+  itens?: string[];
+
+  /** texto */
   texto?: string;
-  /** texto depois da lacuna, para casos como SA [ ] TO */
-  texto_depois?: string;
-  /** onde entra o quadrinho vazio dentro da célula */
-  lacuna?: "antes" | "depois" | "meio" | "nenhuma";
-  /** desenha o texto dentro de um círculo grosso, como nas folhas de alfabeto */
-  circulo?: boolean;
 }
 
-/** Um par da legenda: a marca que aparece, e o que ela significa. */
-export interface ItemLegenda {
-  marca: string;
-  valor: string;
-}
-
-/** Uma linha do código secreto: marcas a decifrar e quantas caixas preencher. */
-export interface LinhaSequencia {
-  marcas: string[];
-}
-
-export interface BlocoFolha {
-  numero?: number;
-  enunciado: string;
-  formato?:
-    | "linhas" | "caixa" | "multipla" | "completar" | "ligar" | "desenho"
-    /** grade de células com borda: figura + palavra + lacuna */
-    | "grade"
-    /** caixa de legenda: marca → valor */
-    | "legenda"
-    /** código secreto: linhas de marcas com caixas para escrever */
-    | "sequencia";
-  /** grade: quantas colunas (2 a 4) */
-  colunas?: number;
-  celulas?: CelulaFolha[];
-  itens_legenda?: ItemLegenda[];
-  linhas_sequencia?: LinhaSequencia[];
-  opcoes?: string[];
-  /**
-   * Pares do exercício de ligar. `direita` pode ser texto ou, quando o par tem
-   * `imagem`, a figura que fica do lado direito para o aluno conectar.
-   */
-  pares?: { esquerda: string; direita?: string; imagem?: string }[];
-  linhas?: number;
-  /** data: URL em base64, já embutida pela edge function */
-  imagem?: string;
-}
-
-export interface PaginaFolha {
-  instrucoes?: string;
-  blocos?: BlocoFolha[];
-}
-
-/** O material que o professor anexou (a tirinha, a prova, a folha original). */
-export interface MaterialOriginal {
-  /** data: URL em base64 da imagem enviada pelo professor */
-  imagem?: string;
-  legenda?: string;
-}
+export interface MaterialOriginal { imagem?: string; legenda?: string }
 
 export interface Folha {
   titulo?: string;
-  disciplina?: string;
+  /** faixa escura do topo, ex: "LÍNGUA PORTUGUESA — PRODUÇÃO TEXTUAL" */
+  faixa?: string;
+  /** pílula amarela, ex: "GÊNERO TEXTUAL: NOTÍCIA" */
+  etiqueta?: string;
+  /** balão de convite ao lado da etiqueta */
+  convite?: string;
   aluno?: string;
   adaptacoes_aplicadas?: string[];
-  config?: {
-    fonte?: string;
-    tamanho_pt?: number;
-    espacamento?: number;
-    itens_por_pagina?: number;
-    /** repete o material original em todas as páginas, para o aluno não precisar voltar */
-    repetir_material?: boolean;
-  };
+  config?: { fonte?: string; tamanho_pt?: number };
   material_original?: MaterialOriginal;
-  paginas?: PaginaFolha[];
+  secoes?: SecaoFolha[];
+  chamada_final?: { titulo?: string; texto?: string };
 }
 
 const esc = (s: unknown) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
-/** Lexend e Verdana podem não existir na máquina; a pilha garante um fallback legível. */
 function pilhaFonte(fonte?: string) {
   const f = (fonte || "Verdana").trim();
   return `'${f}', Verdana, Tahoma, 'Trebuchet MS', sans-serif`;
 }
 
-// ---------------------------------------------------------------------------
-// HTML — usado no preview, no PDF e no PNG
-// ---------------------------------------------------------------------------
-
-/** O enunciado já traz as lacunas de resposta? Então não repetir linha embaixo. */
-const temLacuna = (txt: string) => /_{3,}/.test(txt || "");
-
-/**
- * Limpa o que o modelo deixa passar no enunciado:
- * - numeração própria ("1) ", "2. "), que duplicaria a bolinha do renderizador;
- * - marcadores de figura em texto ("[desenho de uma bola]"), que deveriam ter
- *   virado imagem e, quando não viram, não podem aparecer para o aluno.
- */
-function limparEnunciado(txt: string, temNumero: boolean): string {
-  let t = txt || "";
-  if (temNumero) t = t.replace(/^\s*\d+\s*[).\-–]\s*/, "");
-  t = t.replace(/\[\s*(?:desenho|imagem|figura|foto)\s*:?\s*(?:de|da|do|dos|das)?\s*[^\]]*\]/gi, "");
-  return t.replace(/[ \t]{2,}/g, " ").trim();
+/** Transforma ___ em linha de escrita. */
+function comLacunas(txt: string, pt: number): string {
+  return esc(txt).replace(/_{2,}/g, () =>
+    `<span style="display:inline-block;min-width:${pt * 9}px;border-bottom:1.5px solid #555;">&nbsp;</span>`);
 }
 
-/** Quadrinho vazio onde o aluno escreve a sílaba ou a letra que falta. */
-const lacunaHtml = (pt: number) =>
-  `<span style="display:inline-block;min-width:${pt * 3.4}px;height:${pt * 3.4}px;border:2.5px solid #333;border-radius:4px;vertical-align:middle;margin:0 4px;"></span>`;
+// ---------------------------------------------------------------------------
+// HTML — preview, PDF e PNG
+// ---------------------------------------------------------------------------
 
-/** Uma célula da grade: figura em cima, palavra embaixo, lacuna na posição pedida. */
-function celulaHtml(c: CelulaFolha, pt: number): string {
-  const img = c.imagem
-    ? `<img src="${c.imagem}" alt="" style="display:block;margin:0 auto ${pt * 0.7}px;max-width:100%;max-height:${pt * 11}px;object-fit:contain;" />`
-    : "";
+function conteudoSecao(s: SecaoFolha, pt: number): string {
+  const c = cor(s.cor);
+  const peq = (pt * 0.82).toFixed(1);
 
-  const texto = esc(c.texto ?? "");
-  const depois = esc(c.texto_depois ?? "");
-  const lac = lacunaHtml(pt);
-  // texto e texto_depois são as partes ANTES e DEPOIS da lacuna. O modelo nem sempre
-  // usa o campo que a gente espera: com a lacuna no início ele deixa "texto" vazio e
-  // põe a palavra toda em "texto_depois". Montar pelas partes evita perder a palavra.
-  let linha: string;
-  switch (c.lacuna) {
-    case "antes":  linha = `${lac}${texto}${depois}`; break;
-    case "meio":   linha = `${texto}${lac}${depois}`; break;
-    case "depois": linha = `${texto}${depois}${lac}`; break;
-    default:       linha = `${texto}${depois}`;
-  }
-
-  const estiloTexto = c.circulo
-    ? `display:inline-flex;align-items:center;justify-content:center;width:${pt * 4.4}px;height:${pt * 4.4}px;border:3px solid #333;border-radius:999px;font-weight:800;font-size:${pt * 1.6}pt;`
-    : `font-weight:800;font-size:${pt * 1.25}pt;letter-spacing:1px;`;
-
-  const conteudo = (texto || depois || c.lacuna)
-    ? `<div style="text-align:center;"><span style="${estiloTexto}">${linha}</span></div>`
-    : "";
-
-  return `<div style="border:2px solid #333;border-radius:6px;padding:${pt}px ${pt * 0.6}px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:${pt * 0.4}px;min-height:${pt * 13}px;">
-    ${img}${conteudo}
-  </div>`;
-}
-
-function blocoHtml(b: BlocoFolha, pt: number): string {
-  const num = b.numero != null
-    ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:${pt * 2}px;height:${pt * 2}px;border-radius:999px;background:#E95A3A;color:#fff;font-weight:700;margin-right:10px;flex:none;">${esc(b.numero)}</span>`
-    : "";
-
-  let resposta = "";
-  const linhas = Math.max(1, b.linhas ?? 2);
-
-  switch (b.formato) {
-    case "caixa":
-      resposta = `<div style="border:1.5px solid #333;border-radius:6px;height:${linhas * pt * 2.2}px;margin-top:10px;"></div>`;
-      break;
-    case "multipla":
-      resposta = `<div style="margin-top:10px;display:flex;flex-direction:column;gap:${pt * 0.7}px;">${
-        (b.opcoes ?? []).map((o) =>
-          `<div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:${pt}px;height:${pt}px;border:1.5px solid #333;border-radius:3px;flex:none;"></span><span>${esc(o)}</span></div>`,
-        ).join("")
-      }</div>`;
-      break;
-    case "grade": {
-      const cels = b.celulas ?? [];
-      if (cels.length === 0) { resposta = ""; break; }
-      const cols = Math.min(4, Math.max(2, b.colunas ?? 3));
-      resposta = `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:${pt * 1.1}px;margin-top:${pt}px;">
-        ${cels.map((c) => celulaHtml(c, pt)).join("")}
-      </div>`;
-      break;
-    }
-
-    case "legenda": {
-      const itens = b.itens_legenda ?? [];
-      if (itens.length === 0) { resposta = ""; break; }
-      const cols = Math.min(6, Math.max(3, Math.ceil(itens.length / 2)));
-      resposta = `<div style="border:2.5px solid #333;border-radius:14px;padding:${pt}px ${pt * 1.2}px;margin-top:${pt}px;
-          display:grid;grid-template-columns:repeat(${cols},1fr);gap:${pt * 0.8}px ${pt}px;justify-items:center;">
-        ${itens.map((i) => `<div style="text-align:center;line-height:1.15;">
-            <div style="font-size:${pt * 1.5}pt;">${esc(i.marca)}</div>
-            <div style="font-weight:800;font-size:${pt * 1.1}pt;letter-spacing:1px;">${esc(i.valor)}</div>
-          </div>`).join("")}
-      </div>`;
-      break;
-    }
-
-    case "sequencia": {
-      const seqs = (b.linhas_sequencia ?? []).filter((l) => (l?.marcas ?? []).length > 0);
-      if (seqs.length === 0) { resposta = ""; break; }
-      resposta = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:${pt * 1.6}px ${pt * 2.4}px;margin-top:${pt * 1.2}px;">
-        ${seqs.map((l) => `<div style="text-align:center;">
-            <div style="display:flex;justify-content:center;gap:${pt * 1.2}px;font-size:${pt * 1.6}pt;margin-bottom:${pt * 0.5}px;">
-              ${l.marcas.map((m) => `<span>${esc(m)}</span>`).join("")}
-            </div>
-            <div style="display:flex;justify-content:center;gap:${pt * 0.5}px;">
-              ${l.marcas.map(() => `<span style="display:inline-block;width:${pt * 3.6}px;height:${pt * 3.2}px;border:2.5px solid #333;border-radius:4px;"></span>`).join("")}
-            </div>
-          </div>`).join("")}
-      </div>`;
-      break;
-    }
-
-    case "ligar": {
-      const pares = (b.pares ?? []).filter((p) => p?.esquerda);
-      // Um par sozinho não é exercício de ligar, e um lado direito vazio deixava
-      // a folha com um ponto solto sem nada para conectar. Nesses casos vira
-      // linha de resposta, que ao menos é utilizável.
-      const utilizavel = pares.length >= 2 && pares.some((p) => p.imagem || p.direita);
-      if (!utilizavel) {
-        resposta = `<div style="margin-top:10px;"><div style="border-bottom:1.5px solid #333;height:${pt * 2.4}px;"></div></div>`;
-        break;
-      }
-      const ponto = `<span style="display:inline-block;width:9px;height:9px;border:2px solid #333;border-radius:999px;flex:none;"></span>`;
-      const ladoDireito = (p: { direita?: string; imagem?: string }) =>
-        p.imagem
-          ? `<img src="${p.imagem}" alt="" style="width:${pt * 7}px;height:${pt * 7}px;object-fit:contain;" />`
-          : `<span>${esc(p.direita ?? "")}</span>`;
-      resposta = `<div style="display:flex;justify-content:space-between;align-items:stretch;gap:${pt * 3}px;margin-top:14px;">
-        <div style="display:flex;flex-direction:column;justify-content:space-around;gap:${pt * 1.6}px;">
-          ${pares.map((p) => `<div style="display:flex;align-items:center;gap:10px;font-weight:700;">${esc(p.esquerda)}${ponto}</div>`).join("")}
-        </div>
-        <div style="display:flex;flex-direction:column;justify-content:space-around;gap:${pt * 1.6}px;">
-          ${pares.map((p) => `<div style="display:flex;align-items:center;gap:10px;">${ponto}${ladoDireito(p)}</div>`).join("")}
+  switch (s.tipo) {
+    case "info": {
+      const img = s.imagem
+        ? `<img src="${s.imagem}" alt="" style="width:${pt * 13}px;height:${pt * 13}px;object-fit:cover;border-radius:8px;border:2px solid ${c.borda};flex:none;" />`
+        : "";
+      const linhas = (s.dados ?? []).map((d) =>
+        `<div style="display:flex;gap:6px;align-items:baseline;margin-bottom:3px;">
+           <span style="flex:none;">${esc(d.icone || "•")}</span>
+           <span><b>${esc(d.rotulo)}:</b> ${esc(d.valor)}</span>
+         </div>`).join("");
+      return `<div style="display:flex;gap:${pt}px;align-items:flex-start;">
+        ${img}
+        <div style="flex:1;font-size:${peq}pt;line-height:1.4;">
+          ${s.destaque ? `<p style="margin:0 0 6px;">${esc(s.destaque)}</p>` : ""}
+          ${linhas}
         </div>
       </div>`;
-      break;
     }
-    case "desenho":
-      resposta = `<div style="border:2px dashed #999;border-radius:8px;height:${Math.max(160, linhas * pt * 4)}px;margin-top:10px;"></div>`;
-      break;
-    case "completar":
-      // Quando o enunciado já traz as lacunas ("b_l_"), o espaço de resposta é
-      // o próprio underscore. Mas se o modelo escreve só a instrução ("forme a
-      // palavra com BO - LA"), sem lacuna, a folha sairia sem lugar nenhum para
-      // o aluno escrever — então damos a linha.
-      resposta = temLacuna(b.enunciado)
-        ? ""
-        : `<div style="margin-top:10px;">${
-            Array.from({ length: linhas }).map(() =>
-              `<div style="border-bottom:1.5px solid #333;height:${pt * 2.4}px;"></div>`,
-            ).join("")
-          }</div>`;
-      break;
+
+    case "relacionar": {
+      return `<div style="display:flex;flex-direction:column;gap:${pt * 0.6}px;">
+        ${(s.pares ?? []).map((p) => {
+          const pc = cor(p.cor ?? s.cor);
+          return `<div style="display:flex;align-items:center;gap:8px;">
+            <div style="flex:0 0 38%;background:${pc.fundo};border:2px solid ${pc.borda};color:${pc.texto};
+                 border-radius:7px;padding:5px 7px;font-weight:800;font-size:${peq}pt;text-align:center;">${esc(p.rotulo)}</div>
+            <span style="width:7px;height:7px;border:2px solid #333;border-radius:999px;flex:none;"></span>
+            <span style="flex:1;border-bottom:1px dotted #bbb;"></span>
+            <span style="width:7px;height:7px;border:2px solid #333;border-radius:999px;flex:none;"></span>
+            <div style="flex:0 0 42%;border:1.5px solid #cbd5e1;border-radius:7px;padding:5px 7px;font-size:${peq}pt;">${esc(p.definicao)}</div>
+          </div>`;
+        }).join("")}
+      </div>`;
+    }
+
+    case "perguntas":
+      return `<div style="display:flex;flex-direction:column;gap:${pt * 0.55}px;">
+        ${(s.perguntas ?? []).map((q) => `<div style="display:flex;gap:8px;align-items:stretch;">
+            <div style="flex:0 0 44%;background:${c.fundo};border:2px solid ${c.borda};color:${c.texto};
+                 border-radius:999px;padding:5px 10px;font-size:${peq}pt;font-weight:700;display:flex;gap:5px;align-items:center;">
+              <span>${esc(q.icone || "?")}</span><span>${esc(q.pergunta)}</span>
+            </div>
+            <div style="flex:1;border:1.5px solid #94a3b8;border-radius:7px;min-height:${pt * 2.2}px;"></div>
+          </div>`).join("")}
+      </div>`;
+
+    case "producao":
+      return `<div style="display:flex;flex-direction:column;gap:${pt * 0.6}px;">
+        ${(s.campos ?? []).map((campo) => {
+          const cc = cor(campo.cor ?? s.cor);
+          return `<div style="background:${cc.fundo};border:2px solid ${cc.borda};border-radius:8px;padding:${pt * 0.6}px ${pt * 0.7}px;">
+            <div style="font-weight:800;color:${cc.texto};font-size:${peq}pt;margin-bottom:3px;">${esc(campo.rotulo)}</div>
+            <div style="font-size:${peq}pt;line-height:2.1;">${comLacunas(campo.texto, pt)}</div>
+          </div>`;
+        }).join("")}
+      </div>`;
+
+    case "checklist":
+      return `<div style="font-size:${peq}pt;">
+        ${(s.itens ?? []).map((i) => `<div style="display:flex;gap:7px;align-items:center;margin-bottom:4px;">
+            <span style="width:${pt}px;height:${pt}px;border:2px solid #333;border-radius:3px;flex:none;"></span>
+            <span>${esc(i)}</span>
+          </div>`).join("")}
+      </div>`;
+
     default:
-      resposta = temLacuna(b.enunciado)
-        ? ""
-        : `<div style="margin-top:10px;">${
-            Array.from({ length: linhas }).map(() =>
-              `<div style="border-bottom:1.5px solid #333;height:${pt * 2.2}px;"></div>`,
-            ).join("")
-          }</div>`;
+      return `<div style="font-size:${peq}pt;line-height:1.5;">${comLacunas(s.texto ?? "", pt)}</div>`;
   }
-
-  const img = b.imagem
-    ? `<div style="text-align:center;margin:12px 0;"><img src="${b.imagem}" alt="" style="max-width:250px;max-height:250px;object-fit:contain;" /></div>`
-    : "";
-
-  return `<div style="margin-bottom:${pt * 2}px;break-inside:avoid;">
-    <div style="display:flex;align-items:flex-start;">${num}<div style="flex:1;white-space:pre-wrap;">${esc(limparEnunciado(b.enunciado, b.numero != null))}</div></div>
-    ${img}${resposta}
-  </div>`;
 }
 
-/** Uma página A4 (794×1123 px a 96dpi), pronta para html2canvas. */
-export function paginaHtml(folha: Folha, idx: number): string {
+function secaoHtml(s: SecaoFolha, pt: number): string {
+  const c = cor(s.cor);
+  const inteira = s.largura === "inteira";
+  return `<section style="grid-column:${inteira ? "1 / -1" : "auto"};border:2px solid ${c.borda};border-radius:10px;
+      padding:${pt * 0.7}px ${pt * 0.8}px;background:#fff;break-inside:avoid;">
+    <div style="display:flex;gap:7px;align-items:center;margin-bottom:${s.subtitulo ? 2 : 6}px;">
+      ${s.numero != null ? `<span style="flex:none;width:${pt * 1.7}px;height:${pt * 1.7}px;border-radius:999px;background:${c.borda};
+           color:#fff;font-weight:800;font-size:${(pt * 0.85).toFixed(1)}pt;display:flex;align-items:center;justify-content:center;">${s.numero}</span>` : ""}
+      <h3 style="margin:0;font-size:${(pt * 0.92).toFixed(1)}pt;font-weight:800;color:${c.texto};text-transform:uppercase;letter-spacing:.3px;">${esc(s.titulo)}</h3>
+    </div>
+    ${s.subtitulo ? `<p style="margin:0 0 ${pt * 0.5}px ${pt * 2.3}px;font-size:${(pt * 0.75).toFixed(1)}pt;color:#555;">${esc(s.subtitulo)}</p>` : ""}
+    ${conteudoSecao(s, pt)}
+  </section>`;
+}
+
+/** A folha inteira numa página A4 (794×1123 px a 96dpi). */
+export function paginaHtml(folha: Folha, _idx = 0): string {
   const cfg = folha.config ?? {};
-  const pt = cfg.tamanho_pt ?? 12;
-  const pag = (folha.paginas ?? [])[idx] ?? {};
-  const total = (folha.paginas ?? []).length;
-
-  const instrucoes = pag.instrucoes
-    ? `<div style="background:#F5F5F5;border-left:4px solid #E95A3A;padding:12px 14px;margin-bottom:${pt * 2}px;border-radius:0 6px 6px 0;">${esc(pag.instrucoes)}</div>`
-    : "";
-
-  // O material que o professor anexou, impresso na própria folha. Vai sempre na
-  // página 1; nas demais, só quando o perfil pedir para não fazer o aluno voltar.
+  const pt = cfg.tamanho_pt ?? 11;
+  const secoes = folha.secoes ?? [];
   const mat = folha.material_original;
-  const mostraMaterial = mat?.imagem && (idx === 0 || cfg.repetir_material);
-  const materialHtml = mostraMaterial
-    ? `<div style="border:1.5px solid #ddd;border-radius:8px;padding:10px;margin-bottom:${pt * 2}px;background:#FCFCFC;">
-         <div style="font-size:${pt * 0.72}pt;letter-spacing:1px;color:#888;text-transform:uppercase;margin-bottom:6px;">
-           ${esc(mat!.legenda || "Material da atividade")}
-         </div>
-         <img src="${mat!.imagem}" alt="" style="display:block;margin:0 auto;max-width:100%;max-height:330px;object-fit:contain;" />
+
+  const cab = `<div style="background:${MARINHO};color:#fff;border-radius:9px;padding:${pt * 0.6}px ${pt}px;
+      display:flex;justify-content:space-between;align-items:center;gap:${pt}px;">
+    <span style="font-weight:800;letter-spacing:.6px;font-size:${(pt * 0.95).toFixed(1)}pt;">${esc(folha.faixa || "ATIVIDADE PEDAGÓGICA")}</span>
+    <span style="background:#fff;color:#333;border-radius:7px;padding:4px ${pt * 0.8}px;font-size:${(pt * 0.8).toFixed(1)}pt;white-space:nowrap;">
+      ALUNO(A): ______________________
+    </span>
+  </div>`;
+
+  const faixa2 = (folha.etiqueta || folha.convite)
+    ? `<div style="display:flex;gap:${pt * 0.8}px;align-items:stretch;margin-top:${pt * 0.7}px;">
+        ${folha.etiqueta ? `<div style="background:${PALETA.amarelo.fundo};border:2px solid ${PALETA.amarelo.borda};color:${PALETA.amarelo.texto};
+             border-radius:999px;padding:5px ${pt}px;font-weight:800;font-size:${(pt * 0.9).toFixed(1)}pt;display:flex;align-items:center;">${esc(folha.etiqueta)}</div>` : ""}
+        ${folha.convite ? `<div style="flex:1;background:${PALETA.azul.fundo};border:2px solid ${PALETA.azul.borda};color:${PALETA.azul.texto};
+             border-radius:10px;padding:5px ${pt * 0.8}px;font-size:${(pt * 0.82).toFixed(1)}pt;display:flex;align-items:center;">📣 ${esc(folha.convite)}</div>` : ""}
+      </div>`
+    : "";
+
+  const material = mat?.imagem
+    ? `<div style="margin-top:${pt * 0.7}px;border:2px solid #cbd5e1;border-radius:9px;padding:${pt * 0.5}px;text-align:center;">
+         ${mat.legenda ? `<div style="font-size:${(pt * 0.7).toFixed(1)}pt;color:#777;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${esc(mat.legenda)}</div>` : ""}
+         <img src="${mat.imagem}" alt="" style="max-width:100%;max-height:${pt * 20}px;object-fit:contain;" />
        </div>`
     : "";
 
-  // Nome/turma/data só na primeira página: repetir o cabeçalho inteiro em todas
-  // come o espaço útil e não serve para nada, já que o aluno preenche uma vez.
-  const cabecalho = idx === 0
-    ? `<div style="border-bottom:2px solid #ddd;padding-bottom:12px;margin-bottom:18px;">
-         <div style="font-size:${pt * 0.72}pt;letter-spacing:2px;color:#888;text-transform:uppercase;">Atividade Pedagógica</div>
-         <div style="font-size:${pt * 1.5}pt;font-weight:700;margin-top:4px;">${esc(folha.titulo || "Atividade")}</div>
-         ${folha.disciplina ? `<div style="font-size:${pt * 0.8}pt;color:#777;margin-top:2px;">${esc(folha.disciplina)}</div>` : ""}
-       </div>
-       <div style="display:flex;gap:20px;padding:10px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;font-size:${pt * 0.85}pt;margin-bottom:${pt * 1.6}px;">
-         <div style="flex:2;">Nome: <span style="display:inline-block;border-bottom:1px solid #333;min-width:190px;"></span></div>
-         <div style="flex:1;">Turma: <span style="display:inline-block;border-bottom:1px solid #333;min-width:70px;"></span></div>
-         <div style="flex:1;">Data: ___/___/______</div>
-       </div>`
-    : `<div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:${pt * 1.6}px;">
-         <span style="font-size:${pt * 0.95}pt;font-weight:700;">${esc(folha.titulo || "Atividade")}</span>
-         <span style="font-size:${pt * 0.72}pt;color:#999;">Página ${idx + 1} de ${total}</span>
-       </div>`;
+  const rodape = (folha.chamada_final?.titulo || folha.chamada_final?.texto)
+    ? `<div style="grid-column:1 / -1;background:${PALETA.amarelo.fundo};border:2px solid ${PALETA.amarelo.borda};
+         border-radius:10px;padding:${pt * 0.7}px ${pt}px;text-align:center;">
+        <div style="font-weight:800;color:${PALETA.amarelo.texto};font-size:${(pt * 1.05).toFixed(1)}pt;">${esc(folha.chamada_final?.titulo ?? "")}</div>
+        ${folha.chamada_final?.texto ? `<div style="font-size:${(pt * 0.78).toFixed(1)}pt;color:#6B3F05;margin-top:2px;">${esc(folha.chamada_final.texto)}</div>` : ""}
+      </div>`
+    : "";
 
-  return `<div style="width:794px;min-height:1123px;box-sizing:border-box;padding:56px 64px;background:#fff;color:#111;
-      font-family:${pilhaFonte(cfg.fonte)};font-size:${pt}pt;line-height:${cfg.espacamento ?? 1.5};">
-    ${cabecalho}
-    ${materialHtml}
-    ${instrucoes}
-    ${(pag.blocos ?? []).map((b) => blocoHtml(b, pt)).join("")}
-    <div style="position:absolute;"></div>
-    <div style="margin-top:28px;padding-top:10px;border-top:1px solid #eee;text-align:center;font-size:${pt * 0.68}pt;color:#999;">
-      TUPI · Tecnologia Universal para Práticas da Inclusão${total > 1 ? ` · Página ${idx + 1} de ${total}` : ""}
+  return `<div style="width:794px;min-height:1123px;box-sizing:border-box;padding:28px 30px;background:#fff;color:#111;
+      font-family:${pilhaFonte(cfg.fonte)};font-size:${pt}pt;line-height:1.35;">
+    ${cab}${faixa2}${material}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:${pt * 0.8}px;margin-top:${pt * 0.8}px;align-items:start;">
+      ${secoes.map((s) => secaoHtml(s, pt)).join("")}
+      ${rodape}
+    </div>
+    <div style="margin-top:${pt}px;text-align:center;font-size:${(pt * 0.65).toFixed(1)}pt;color:#999;">
+      TUPI · Tecnologia Universal para Práticas da Inclusão
     </div>
   </div>`;
 }
 
-/** Documento completo, para baixar como .html ou imprimir. */
 export function folhaHtmlCompleto(folha: Folha): string {
-  const paginas = (folha.paginas ?? []).map((_, i) => paginaHtml(folha, i)).join(
-    `<div style="page-break-after:always;"></div>`,
-  );
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8" />
 <title>${esc(folha.titulo || "Atividade")}</title>
 <style>@page{size:A4;margin:0;} body{margin:0;background:#fff;}</style>
-</head><body>${paginas}</body></html>`;
+</head><body>${paginaHtml(folha)}</body></html>`;
 }
 
 // ---------------------------------------------------------------------------
-// DOCX — mesma estrutura, com quebra de página de verdade
+// DOCX — mesma estrutura, em coluna única para o Word não embaralhar o layout
 // ---------------------------------------------------------------------------
 
 const dataUrlParaBytes = (d: string): Uint8Array => {
-  const b64 = d.slice(d.indexOf(",") + 1);
-  const bin = atob(b64);
+  const bin = atob(d.slice(d.indexOf(",") + 1));
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 };
-
 const tipoImagem = (d: string): "png" | "jpg" =>
   d.slice(0, 30).includes("image/png") ? "png" : "jpg";
 
-/** Largura e altura reais da imagem, lidas dos bytes (PNG e JPEG). */
-function dimensoesImagem(bytes: Uint8Array): { w: number; h: number } | null {
-  // PNG: IHDR traz largura e altura nos bytes 16..23
-  if (bytes[0] === 0x89 && bytes[1] === 0x50) {
-    const dv = new DataView(bytes.buffer, bytes.byteOffset);
-    return { w: dv.getUint32(16), h: dv.getUint32(20) };
-  }
-  // JPEG: percorre os marcadores até achar um SOF
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
-    let i = 2;
-    while (i < bytes.length - 9) {
-      if (bytes[i] !== 0xff) { i++; continue; }
-      const marcador = bytes[i + 1];
-      // SOF0..SOF15, pulando os que não carregam dimensão
-      if (marcador >= 0xc0 && marcador <= 0xcf &&
-          marcador !== 0xc4 && marcador !== 0xc8 && marcador !== 0xcc) {
-        const dv = new DataView(bytes.buffer, bytes.byteOffset);
-        return { h: dv.getUint16(i + 5), w: dv.getUint16(i + 7) };
-      }
-      i += 2 + ((bytes[i + 2] << 8) | bytes[i + 3]);
-    }
-  }
-  return null;
-}
+const semHex = (h: string) => h.replace("#", "").toUpperCase();
 
-/** Encaixa o material anexado na largura útil da página, sem distorcer. */
-function dimensaoMaterial(dataUrl: string): { width: number; height: number } {
-  const MAX_W = 450;   // largura útil do A4 com as margens da folha
-  const MAX_H = 330;
-  const dim = dimensoesImagem(dataUrlParaBytes(dataUrl));
-  if (!dim || !dim.w || !dim.h) return { width: 400, height: 260 };
-  const escala = Math.min(MAX_W / dim.w, MAX_H / dim.h, 1);
-  return { width: Math.round(dim.w * escala), height: Math.round(dim.h * escala) };
-}
-
-/**
- * No Word não existe fallback de fonte: se a fonte não estiver instalada na
- * máquina, ele troca por uma qualquer — normalmente uma serifada, que é o
- * oposto do que a adaptação de dislexia pede. Lexend quase nunca está
- * instalada, então no DOCX usamos Verdana, que vem em todo Windows e Mac e
- * também é recomendada para leitores com dislexia. No preview em HTML a
- * Lexend continua sendo usada, porque lá existe pilha de fallback.
- */
+/** No Word não há fallback de fonte: Lexend quase nunca está instalada. */
 function fonteDocx(fonte?: string): string {
   const f = (fonte || "Verdana").trim();
-  const arriscadas = ["lexend", "opendyslexic", "dyslexie", "atkinson hyperlegible"];
-  return arriscadas.includes(f.toLowerCase()) ? "Verdana" : f;
+  return ["lexend", "opendyslexic", "dyslexie"].includes(f.toLowerCase()) ? "Verdana" : f;
 }
 
-/** Caixa de resposta com altura real: tabela de 1 célula com altura fixa. */
-function caixaResposta(alturaTwips: number, tracejada: boolean): Table {
-  const estilo = tracejada ? BorderStyle.DASHED : BorderStyle.SINGLE;
-  const cor = tracejada ? "999999" : "333333";
-  const borda = { style: estilo, size: tracejada ? 8 : 6, color: cor };
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: [new TableRow({
-      height: { value: alturaTwips, rule: "atLeast" },
-      children: [new TableCell({
-        verticalAlign: VerticalAlign.TOP,
-        borders: { top: borda, bottom: borda, left: borda, right: borda },
-        children: [new Paragraph({ children: [new TextRun({ text: " " })] })],
-      })],
-    })],
+function caixaDocx(
+  texto: string,
+  c: { fundo: string; borda: string; texto: string },
+  half: number,
+  fonte: string,
+  negrito = false,
+) {
+  return new Paragraph({
+    children: [new TextRun({ text: texto, size: half, font: fonte, bold: negrito, color: semHex(c.texto) })],
+    shading: { type: ShadingType.CLEAR, fill: semHex(c.fundo) },
+    border: {
+      top: { style: BorderStyle.SINGLE, size: 8, color: semHex(c.borda), space: 4 },
+      bottom: { style: BorderStyle.SINGLE, size: 8, color: semHex(c.borda), space: 4 },
+      left: { style: BorderStyle.SINGLE, size: 8, color: semHex(c.borda), space: 6 },
+      right: { style: BorderStyle.SINGLE, size: 8, color: semHex(c.borda), space: 6 },
+    },
+    spacing: { before: 60, after: 90 },
   });
-}
-
-/** Conteúdo de uma célula da grade no Word: figura em cima, palavra embaixo. */
-function celulaDocx(c: CelulaFolha, half: number, fonte: string): Paragraph[] {
-  const saida: Paragraph[] = [];
-  if (c.imagem) {
-    try {
-      saida.push(new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [new ImageRun({
-          data: dataUrlParaBytes(c.imagem),
-          type: tipoImagem(c.imagem),
-          transformation: { width: 95, height: 95 },
-        })],
-      }));
-    } catch { /* imagem inválida: a célula segue sem ela */ }
-  }
-  const vazio = "____";
-  const t = c.texto ?? "";
-  const d = c.texto_depois ?? "";
-  let linha = `${t}${d}`;
-  if (c.lacuna === "antes") linha = `${vazio} ${t}${d}`;
-  else if (c.lacuna === "meio") linha = `${t} ${vazio} ${d}`;
-  else if (c.lacuna === "depois") linha = `${t}${d} ${vazio}`;
-  if (linha.trim()) {
-    saida.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: linha, bold: true, size: Math.round(half * 1.15), font: fonte })],
-    }));
-  }
-  if (saida.length === 0) saida.push(new Paragraph({ children: [new TextRun({ text: " " })] }));
-  return saida;
 }
 
 export async function folhaParaDocx(folha: Folha): Promise<Blob> {
   const cfg = folha.config ?? {};
-  const pt = cfg.tamanho_pt ?? 12;
-  const half = pt * 2;                                  // docx mede em meios-pontos
+  const pt = cfg.tamanho_pt ?? 11;
+  const half = pt * 2;
   const fonte = fonteDocx(cfg.fonte);
-  const linhaEspaco = Math.round((cfg.espacamento ?? 1.5) * 240);
-  const paginas = folha.paginas ?? [];
-
   const filhos: (Paragraph | Table)[] = [];
 
-  paginas.forEach((pag, pi) => {
-    if (pi > 0) filhos.push(new Paragraph({ children: [new PageBreak()] }));
+  filhos.push(new Paragraph({
+    children: [new TextRun({ text: folha.faixa || "ATIVIDADE PEDAGÓGICA", bold: true, size: Math.round(half * 1.05), color: "FFFFFF", font: fonte })],
+    shading: { type: ShadingType.CLEAR, fill: semHex(MARINHO) },
+    spacing: { after: 80 },
+  }));
+  filhos.push(new Paragraph({
+    children: [new TextRun({ text: "ALUNO(A): ______________________________   DATA: ___/___/______", size: Math.round(half * 0.85), font: fonte })],
+    spacing: { after: 140 },
+  }));
+  if (folha.etiqueta) filhos.push(caixaDocx(folha.etiqueta, PALETA.amarelo, half, fonte, true));
+  if (folha.convite) filhos.push(caixaDocx(folha.convite, PALETA.azul, Math.round(half * 0.9), fonte));
 
-    if (pi === 0) {
+  if (folha.material_original?.imagem) {
+    try {
       filhos.push(new Paragraph({
-        children: [new TextRun({ text: "ATIVIDADE PEDAGÓGICA", size: Math.round(half * 0.7), color: "888888", font: fonte })],
-        spacing: { after: 60 },
+        alignment: AlignmentType.CENTER,
+        children: [new ImageRun({
+          data: dataUrlParaBytes(folha.material_original.imagem),
+          type: tipoImagem(folha.material_original.imagem),
+          transformation: { width: 380, height: 230 },
+        })],
+        spacing: { before: 120, after: 160 },
       }));
+    } catch { /* segue sem o material */ }
+  }
+
+  for (const s of folha.secoes ?? []) {
+    const c = cor(s.cor);
+    filhos.push(new Paragraph({
+      children: [new TextRun({
+        text: `${s.numero != null ? `${s.numero}. ` : ""}${s.titulo.toUpperCase()}`,
+        bold: true, size: Math.round(half * 0.95), color: semHex(c.texto), font: fonte,
+      })],
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 220, after: 60 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: semHex(c.borda), space: 3 } },
+    }));
+    if (s.subtitulo) {
       filhos.push(new Paragraph({
-        children: [new TextRun({ text: folha.titulo || "Atividade", bold: true, size: Math.round(half * 1.5), font: fonte })],
-        heading: HeadingLevel.HEADING_1,
+        children: [new TextRun({ text: s.subtitulo, italics: true, size: Math.round(half * 0.8), color: "555555", font: fonte })],
         spacing: { after: 80 },
-        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "DDDDDD", space: 6 } },
-      }));
-      filhos.push(new Paragraph({
-        children: [new TextRun({
-          text: "Nome: ______________________________   Turma: __________   Data: ___/___/______",
-          size: Math.round(half * 0.85), font: fonte,
-        })],
-        spacing: { before: 160, after: 220 },
-      }));
-    } else {
-      // Páginas seguintes: só o título, sem repetir nome/turma/data.
-      filhos.push(new Paragraph({
-        children: [new TextRun({ text: folha.titulo || "Atividade", bold: true, size: Math.round(half * 0.95), font: fonte })],
-        border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "DDDDDD", space: 4 } },
-        spacing: { after: 200 },
       }));
     }
 
-    // Material anexado pelo professor, impresso na folha
-    const mat = folha.material_original;
-    if (mat?.imagem && (pi === 0 || cfg.repetir_material)) {
-      try {
-        filhos.push(new Paragraph({
-          children: [new TextRun({
-            text: (mat.legenda || "Material da atividade").toUpperCase(),
-            size: Math.round(half * 0.72), color: "888888", font: fonte,
-          })],
-          spacing: { after: 80 },
-        }));
-        filhos.push(new Paragraph({
-          alignment: AlignmentType.CENTER,
-          children: [new ImageRun({
-            data: dataUrlParaBytes(mat.imagem),
-            type: tipoImagem(mat.imagem),
-            transformation: dimensaoMaterial(mat.imagem),
-          })],
-          spacing: { after: 260 },
-        }));
-      } catch { /* imagem inválida: segue sem o material */ }
-    }
-
-    if (pag.instrucoes) {
-      filhos.push(new Paragraph({
-        children: [new TextRun({ text: pag.instrucoes, size: half, font: fonte, italics: true })],
-        shading: { fill: "F5F5F5" },
-        border: { left: { style: BorderStyle.SINGLE, size: 18, color: "E95A3A", space: 8 } },
-        spacing: { after: 240, line: linhaEspaco },
-      }));
-    }
-
-    (pag.blocos ?? []).forEach((b) => {
-      filhos.push(new Paragraph({
-        children: [new TextRun({
-          text: `${b.numero != null ? `${b.numero}. ` : ""}${limparEnunciado(b.enunciado, b.numero != null)}`,
-          size: half, font: fonte, bold: true,
-        })],
-        spacing: { before: 220, after: 110, line: linhaEspaco },
-      }));
-
-      if (b.imagem) {
-        try {
+    switch (s.tipo) {
+      case "info": {
+        if (s.imagem) {
+          try {
+            filhos.push(new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new ImageRun({ data: dataUrlParaBytes(s.imagem), type: tipoImagem(s.imagem), transformation: { width: 180, height: 180 } })],
+              spacing: { after: 100 },
+            }));
+          } catch { /* ignora imagem inválida */ }
+        }
+        if (s.destaque) {
+          filhos.push(new Paragraph({ children: [new TextRun({ text: s.destaque, size: half, font: fonte })], spacing: { after: 80 } }));
+        }
+        for (const d of s.dados ?? []) {
           filhos.push(new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [new ImageRun({
-              data: dataUrlParaBytes(b.imagem),
-              type: tipoImagem(b.imagem),
-              transformation: { width: 230, height: 230 },
-            })],
-            spacing: { after: 140 },
+            children: [
+              new TextRun({ text: `${d.icone || "•"}  ${d.rotulo}: `, bold: true, size: half, font: fonte }),
+              new TextRun({ text: d.valor, size: half, font: fonte }),
+            ],
+            spacing: { after: 50 },
           }));
-        } catch { /* imagem inválida: a folha continua sem ela */ }
+        }
+        break;
       }
-
-      const linhas = Math.max(1, b.linhas ?? 2);
-      switch (b.formato) {
-        case "multipla":
-          (b.opcoes ?? []).forEach((o) => filhos.push(new Paragraph({
-            children: [new TextRun({ text: `(   )  ${o}`, size: half, font: fonte })],
-            spacing: { after: 90, line: linhaEspaco },
-          })));
-          break;
-        case "grade": {
-          const cels = b.celulas ?? [];
-          if (cels.length === 0) break;
-          const cols = Math.min(4, Math.max(2, b.colunas ?? 3));
-          const linhasGrade: TableRow[] = [];
-          for (let i = 0; i < cels.length; i += cols) {
-            const grupo = cels.slice(i, i + cols);
-            while (grupo.length < cols) grupo.push({});
-            linhasGrade.push(new TableRow({
-              children: grupo.map((c) => new TableCell({
-                verticalAlign: VerticalAlign.CENTER,
-                margins: { top: 120, bottom: 120, left: 120, right: 120 },
-                children: celulaDocx(c, half, fonte),
-              })),
-            }));
-          }
-          filhos.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: linhasGrade }));
-          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
-          break;
-        }
-        case "legenda": {
-          const itens = b.itens_legenda ?? [];
-          if (itens.length === 0) break;
-          const cols = Math.min(6, Math.max(3, Math.ceil(itens.length / 2)));
-          const linhasLeg: TableRow[] = [];
-          for (let i = 0; i < itens.length; i += cols) {
-            const grupo = itens.slice(i, i + cols);
-            linhasLeg.push(new TableRow({
-              children: grupo.map((it) => new TableCell({
-                verticalAlign: VerticalAlign.CENTER,
-                margins: { top: 80, bottom: 80, left: 80, right: 80 },
-                children: [
-                  new Paragraph({ alignment: AlignmentType.CENTER,
-                    children: [new TextRun({ text: it.marca, size: Math.round(half * 1.4), font: fonte })] }),
-                  new Paragraph({ alignment: AlignmentType.CENTER,
-                    children: [new TextRun({ text: it.valor, bold: true, size: half, font: fonte })] }),
-                ],
-              })),
-            }));
-          }
-          filhos.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: linhasLeg }));
-          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 280 } }));
-          break;
-        }
-        case "sequencia": {
-          const seqs = (b.linhas_sequencia ?? []).filter((l) => (l?.marcas ?? []).length > 0);
-          if (seqs.length === 0) break;
-          for (const l of seqs) {
-            filhos.push(new Paragraph({
-              alignment: AlignmentType.CENTER,
-              children: [new TextRun({ text: l.marcas.join("   "), size: Math.round(half * 1.5), font: fonte })],
-              spacing: { before: 200, after: 60 },
-            }));
-            // Uma caixa por marca, para o aluno escrever a sílaba decifrada
-            filhos.push(new Table({
-              width: { size: Math.min(100, l.marcas.length * 22), type: WidthType.PERCENTAGE },
-              alignment: AlignmentType.CENTER,
-              rows: [new TableRow({
-                height: { value: 560, rule: "atLeast" },
-                children: l.marcas.map(() => new TableCell({
-                  verticalAlign: VerticalAlign.CENTER,
-                  children: [new Paragraph({ children: [new TextRun({ text: " " })] })],
-                })),
-              })],
-            }));
-            filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 160 } }));
-          }
-          break;
-        }
-        case "ligar": {
-          const pares = (b.pares ?? []).filter((p) => p?.esquerda);
-          const utilizavel = pares.length >= 2 && pares.some((p) => p.imagem || p.direita);
-          if (!utilizavel) {
-            filhos.push(new Paragraph({
-              children: [new TextRun({ text: " ", size: half, font: fonte })],
-              border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 10 } },
-              spacing: { after: 200, line: linhaEspaco },
-            }));
-            break;
-          }
-          // Tabela de 3 colunas: palavra | pontos para ligar | figura
-          filhos.push(new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            borders: {
-              top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-            },
-            rows: pares.map((p) => new TableRow({
+      case "relacionar": {
+        filhos.push(new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: (s.pares ?? []).map((p) => {
+            const pc = cor(p.cor ?? s.cor);
+            return new TableRow({
               children: [
                 new TableCell({
+                  width: { size: 34, type: WidthType.PERCENTAGE },
                   verticalAlign: VerticalAlign.CENTER,
+                  shading: { type: ShadingType.CLEAR, fill: semHex(pc.fundo) },
                   children: [new Paragraph({
-                    children: [new TextRun({ text: `${p.esquerda}  •`, bold: true, size: half, font: fonte })],
-                  })],
-                }),
-                // O ponto fica na coluna do meio, centralizado verticalmente:
-                // junto da imagem ele caía na linha de base, bem abaixo da figura.
-                new TableCell({
-                  verticalAlign: VerticalAlign.CENTER,
-                  children: [new Paragraph({
-                    alignment: AlignmentType.RIGHT,
-                    children: [new TextRun({ text: "•", size: half, font: fonte })],
+                    alignment: AlignmentType.CENTER,
+                    children: [new TextRun({ text: p.rotulo, bold: true, size: half, color: semHex(pc.texto), font: fonte })],
                   })],
                 }),
                 new TableCell({
+                  width: { size: 12, type: WidthType.PERCENTAGE },
                   verticalAlign: VerticalAlign.CENTER,
-                  children: [p.imagem
-                    ? new Paragraph({
-                        children: [new ImageRun({
-                          data: dataUrlParaBytes(p.imagem),
-                          type: tipoImagem(p.imagem),
-                          transformation: { width: 110, height: 110 },
-                        })],
-                      })
-                    : new Paragraph({
-                        children: [new TextRun({ text: p.direita ?? "", size: half, font: fonte })],
-                      }),
-                  ],
+                  children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: "•        •", size: half, font: fonte })] })],
+                }),
+                new TableCell({
+                  width: { size: 54, type: WidthType.PERCENTAGE },
+                  verticalAlign: VerticalAlign.CENTER,
+                  children: [new Paragraph({ children: [new TextRun({ text: p.definicao, size: Math.round(half * 0.9), font: fonte })] })],
                 }),
               ],
-            })),
-          }));
-          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
-          break;
-        }
-        case "desenho":
-          // ~7cm de altura para o aluno desenhar
-          filhos.push(caixaResposta(4000, true));
-          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
-          break;
-        case "caixa":
-          // cada "linha" pedida vira ~1cm de altura útil
-          filhos.push(caixaResposta(Math.max(1200, linhas * 620), false));
-          filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 240 } }));
-          break;
-        case "completar":
-          // mesma regra do HTML: sem lacuna no enunciado, dá a linha
-          if (!temLacuna(b.enunciado)) {
-            for (let i = 0; i < linhas; i++) {
-              filhos.push(new Paragraph({
-                children: [new TextRun({ text: " ", size: half, font: fonte })],
-                border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 10 } },
-                spacing: { after: 200, line: linhaEspaco },
-              }));
-            }
-          }
-          break;
-        default:
-          if (!temLacuna(b.enunciado)) {
-            for (let i = 0; i < linhas; i++) {
-              filhos.push(new Paragraph({
-                children: [new TextRun({ text: " ", size: half, font: fonte })],
-                border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 10 } },
-                spacing: { after: 200, line: linhaEspaco },
-              }));
-            }
-          }
+            });
+          }),
+        }));
+        filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 160 } }));
+        break;
       }
-    });
+      case "perguntas": {
+        filhos.push(new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: (s.perguntas ?? []).map((q) => new TableRow({
+            height: { value: 560, rule: "atLeast" },
+            children: [
+              new TableCell({
+                width: { size: 42, type: WidthType.PERCENTAGE },
+                verticalAlign: VerticalAlign.CENTER,
+                shading: { type: ShadingType.CLEAR, fill: semHex(c.fundo) },
+                children: [new Paragraph({
+                  children: [new TextRun({ text: `${q.icone || "?"}  ${q.pergunta}`, bold: true, size: Math.round(half * 0.9), color: semHex(c.texto), font: fonte })],
+                })],
+              }),
+              new TableCell({
+                width: { size: 58, type: WidthType.PERCENTAGE },
+                children: [new Paragraph({ children: [new TextRun({ text: " " })] })],
+              }),
+            ],
+          })),
+        }));
+        filhos.push(new Paragraph({ children: [new TextRun({ text: "" })], spacing: { after: 160 } }));
+        break;
+      }
+      case "producao": {
+        for (const campo of s.campos ?? []) {
+          const cc = cor(campo.cor ?? s.cor);
+          filhos.push(new Paragraph({
+            children: [new TextRun({ text: campo.rotulo, bold: true, size: Math.round(half * 0.9), color: semHex(cc.texto), font: fonte })],
+            shading: { type: ShadingType.CLEAR, fill: semHex(cc.fundo) },
+            spacing: { before: 120, after: 20 },
+          }));
+          filhos.push(new Paragraph({
+            children: [new TextRun({ text: campo.texto.replace(/_{2,}/g, "________________"), size: half, font: fonte })],
+            spacing: { after: 140, line: 420 },
+          }));
+        }
+        break;
+      }
+      case "checklist": {
+        for (const i of s.itens ?? []) {
+          filhos.push(new Paragraph({
+            children: [new TextRun({ text: `☐  ${i}`, size: half, font: fonte })],
+            spacing: { after: 60 },
+          }));
+        }
+        break;
+      }
+      default:
+        filhos.push(new Paragraph({
+          children: [new TextRun({ text: (s.texto ?? "").replace(/_{2,}/g, "________________"), size: half, font: fonte })],
+          spacing: { after: 120, line: 400 },
+        }));
+    }
+  }
 
-    filhos.push(new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [new TextRun({
-        text: `TUPI · Tecnologia Universal para Práticas da Inclusão${paginas.length > 1 ? ` · Página ${pi + 1} de ${paginas.length}` : ""}`,
-        size: Math.round(half * 0.68), color: "999999", font: fonte,
-      })],
-      spacing: { before: 420 },
-    }));
-  });
+  if (folha.chamada_final?.titulo || folha.chamada_final?.texto) {
+    filhos.push(caixaDocx(
+      `${folha.chamada_final.titulo ?? ""}${folha.chamada_final.texto ? " — " + folha.chamada_final.texto : ""}`,
+      PALETA.amarelo, half, fonte, true,
+    ));
+  }
 
   const doc = new Document({
     creator: "TUPI",
     title: folha.titulo || "Atividade",
     sections: [{
-      properties: { page: { margin: { top: 1000, bottom: 1000, left: 1000, right: 1000 } } },
+      properties: { page: { margin: { top: 700, bottom: 700, left: 700, right: 700 } } },
       children: filhos,
     }],
   });
-
   return Packer.toBlob(doc);
 }

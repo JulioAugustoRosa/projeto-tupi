@@ -20,10 +20,9 @@ const TIMEOUT_MS = 60_000;
 // Um bloco "ligar" sozinho consome 3 ilustrações, então o teto antigo de 10 se
 // esgotava antes do fim da folha e exercícios como "pinte o desenho" saíam sem
 // desenho nenhum. São baixadas em paralelo, então subir o teto não soma latência.
-const MAX_IMAGENS = 18;
+const MAX_IMAGENS = 1;  // a folha tem uma ilustração: a cena do tema
 const MAX_ANEXOS = 2;
 const MAX_ANEXO_BYTES = 4_000_000;
-const MAX_PAGINAS = 4;  // folha densa: o certo é caber em 1 ou 2
 
 const ORIGENS_PERMITIDAS = [
   "https://tupi-adp.vercel.app",
@@ -42,38 +41,72 @@ function cors(origin: string | null) {
 const json = (b: unknown, s: number, o: string | null) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...cors(o), "Content-Type": "application/json" } });
 
-interface PaginaBruta {
-  instrucoes?: string;
-  blocos?: { imagem_prompt?: string; imagem?: string }[];
+interface SecaoBruta {
+  numero?: number;
+  tipo?: string;
+  largura?: string;
+  imagem_prompt?: string;
+  imagem?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Esquema que o modelo deve devolver
 // ---------------------------------------------------------------------------
 const ESQUEMA = `{
-  "titulo": "título curto, 2 a 5 palavras",
-  "disciplina": "disciplina ou tema",
-  "adaptacoes_aplicadas": ["uma frase por decisão de layout, ligada ao perfil"],
-  "config": { "fonte": "Lexend", "tamanho_pt": 14, "espacamento": 1.4, "repetir_material": false },
-  "legenda_material": "",
-  "paginas": [
+  "titulo": "título curto",
+  "faixa": "LÍNGUA PORTUGUESA — PRODUÇÃO TEXTUAL",
+  "etiqueta": "GÊNERO TEXTUAL: NOTÍCIA",
+  "convite": "Vamos produzir uma notícia sobre a inauguração da livraria?",
+  "adaptacoes_aplicadas": ["uma frase por decisão, ligada ao perfil"],
+  "config": { "fonte": "Verdana", "tamanho_pt": 11 },
+  "secoes": [
     {
-      "instrucoes": "UMA frase curta de comando, no máximo 10 palavras",
-      "blocos": [
-        {
-          "formato": "grade",
-          "colunas": 3,
-          "celulas": [
-            { "imagem_prompt": "um gato", "texto": "GA", "texto_depois": "TO", "lacuna": "meio" },
-            { "imagem_prompt": "uma bola", "texto": "BOLA", "lacuna": "nenhuma" },
-            { "texto": "A", "circulo": true, "lacuna": "nenhuma" }
-          ]
-        },
-        { "formato": "legenda", "itens_legenda": [ {"marca":"■","valor":"BO"}, {"marca":"●","valor":"CA"} ] },
-        { "formato": "sequencia", "linhas_sequencia": [ {"marcas":["■","●"]}, {"marcas":["●","▲","★"]} ] }
+      "numero": 1, "titulo": "LEIA E ACOMPANHE AS INFORMAÇÕES", "cor": "azul",
+      "largura": "metade", "tipo": "info",
+      "imagem_prompt": "fachada de uma livraria comunitária",
+      "destaque": "A Comunidade Escolar vai inaugurar uma livraria comunitária.",
+      "dados": [
+        {"icone":"📅","rotulo":"Data","valor":"18 de novembro de 2026"},
+        {"icone":"🕐","rotulo":"Horário","valor":"15 horas"},
+        {"icone":"📍","rotulo":"Local","valor":"Rua dos Estudantes, 96"},
+        {"icone":"👥","rotulo":"Participantes","valor":"professores, alunos e pais"}
       ]
+    },
+    {
+      "numero": 2, "titulo": "CONHECENDO A NOTÍCIA", "subtitulo": "Relacione cada parte à sua função.",
+      "cor": "verde", "largura": "metade", "tipo": "relacionar",
+      "pares": [
+        {"rotulo":"MANCHETE","definicao":"É o título da notícia.","cor":"azul"},
+        {"rotulo":"ABERTURA","definicao":"Apresenta as informações principais.","cor":"verde"},
+        {"rotulo":"CORPO DA NOTÍCIA","definicao":"Explica melhor o acontecimento.","cor":"roxo"}
+      ]
+    },
+    {
+      "numero": 3, "titulo": "ORGANIZE AS INFORMAÇÕES", "subtitulo": "Use o quadro acima para responder.",
+      "cor": "laranja", "largura": "metade", "tipo": "perguntas",
+      "perguntas": [
+        {"icone":"❓","pergunta":"O que vai acontecer?"},
+        {"icone":"📅","pergunta":"Quando?"},
+        {"icone":"📍","pergunta":"Onde?"},
+        {"icone":"👥","pergunta":"Quem participará?"}
+      ]
+    },
+    {
+      "numero": 4, "titulo": "PRODUÇÃO DA NOTÍCIA", "subtitulo": "Use as respostas anteriores.",
+      "cor": "roxo", "largura": "metade", "tipo": "producao",
+      "campos": [
+        {"rotulo":"MANCHETE (TÍTULO)","cor":"azul","texto":"______"},
+        {"rotulo":"ABERTURA","cor":"verde","texto":"A Comunidade Escolar vai inaugurar ______"},
+        {"rotulo":"CORPO DA NOTÍCIA","cor":"roxo","texto":"O evento acontecerá no dia ______, às ______ horas, no endereço ______."}
+      ]
+    },
+    {
+      "numero": 5, "titulo": "REVISÃO", "subtitulo": "Minha notícia tem:",
+      "cor": "cinza", "largura": "metade", "tipo": "checklist",
+      "itens": ["Título.","Informação sobre o acontecimento.","Data e horário.","Local.","Participantes."]
     }
-  ]
+  ],
+  "chamada_final": { "titulo": "Agora é com você!", "texto": "Sua notícia pode informar toda a comunidade." }
 }`;
 
 function montarPrompt(ctx: string, conteudo: string, temMaterial: boolean) {
@@ -96,56 +129,68 @@ Não há material anexado: tudo o que o aluno precisa ler deve estar escrito nos
 Deixe "legenda_material" como string vazia e "repetir_material" como false.
 `;
 
-  return `Você monta FOLHAS DE ATIVIDADE IMPRESSAS para alfabetização, no padrão das
-folhas que circulam entre professores: pouca escrita, muita figura, tudo organizado
-em GRADE, com 6 a 12 itens cabendo numa página só.
+  return `Você monta FOLHAS DE ATIVIDADE ADAPTADAS no padrão usado por professoras
+especialistas em educação inclusiva: UMA página A4, colorida, em duas colunas,
+organizada em SEÇÕES NUMERADAS que se encadeiam como um andaime.
 
 ${ctx}
 ${sobreMaterial}
 ==================================================
-COMO É UMA FOLHA BOA — LEIA ANTES DE TUDO
+A ESTRUTURA — O ALUNO É LEVADO PELA MÃO
 ==================================================
 
-A folha tem UMA linha de instrução no topo e, embaixo, um ARRANJO VISUAL.
-Nunca uma lista de perguntas empilhadas, uma embaixo da outra.
+A folha não é uma lista de perguntas. É um caminho em etapas, onde cada seção
+prepara a seguinte:
 
-Você tem três arranjos. Escolha o que serve ao que o professor pediu:
+1) INFORMAR (tipo "info") — um card com a imagem do tema e os dados organizados
+   por ícone: 📅 data, 🕐 horário, 📍 local, 👥 participantes, 💰 valor, ✏️ autor.
+   É a FONTE que o aluno vai consultar nas seções seguintes.
 
-1) "grade" — o mais usado. Células com borda, 2 a 4 colunas, 6 a 12 no total.
-   Cada célula junta FIGURA + PALAVRA + LACUNA. Serve para:
-   - completar sílaba: figura do domino, texto "", texto_depois "MINÓ", lacuna "antes"
-   - completar no meio: figura do sapato, texto "SA", texto_depois "TO", lacuna "meio"
-   - completar no fim: figura do saco, texto "SACO", lacuna "depois"
-   - só reconhecer: figura + palavra inteira, lacuna "nenhuma"
-   - letra em destaque: texto "A", circulo true, para servir de cabeçalho visual
+2) ENSINAR O GÊNERO (tipo "relacionar") — rótulos coloridos ligados às suas
+   funções. Dá ao aluno o vocabulário da tarefa antes de pedir que ele produza.
 
-2) "legenda" + "sequencia" — o "código secreto". Primeiro um bloco "legenda"
-   ligando marcas a sílabas, depois um bloco "sequencia" com as combinações a
-   decifrar. Use marcas geométricas: ■ ● ▲ ★ ◆ ♥ ⬟ ➡ ⬅ ⬆ ⬇ ☁ ⬢ ✚
-   A legenda vem SEMPRE antes da sequência, e toda marca usada na sequência
-   precisa estar na legenda.
+3) ORGANIZAR (tipo "perguntas") — perguntas-guia curtas, cada uma com uma caixa
+   ao lado. O aluno EXTRAI da seção 1 e escreve em pedaços pequenos.
 
-3) "ligar" — palavras de um lado, figuras do outro, 3 ou 4 pares embaralhados.
+4) PRODUZIR (tipo "producao") — caixas coloridas com FRASES JÁ COMEÇADAS, onde
+   ___ marca onde o aluno continua. Ex: "O evento acontecerá no dia ___, às ___".
+   Esta é a seção mais importante: nunca entregue uma caixa vazia.
+   As cores aqui DEVEM repetir as da seção 2, para o aluno ligar uma à outra.
 
-Os formatos antigos ("linhas", "caixa", "multipla", "desenho") ainda existem, mas
-são o ÚLTIMO recurso: eles geram folha vazia e feia. Prefira sempre grade.
+5) REVISAR (tipo "checklist") — "Minha notícia tem:" com itens para o aluno
+   conferir sozinho. Devolve o controle a ele.
+
+Nem toda atividade precisa das cinco. Escolha as que servem ao que foi pedido,
+mas SEMPRE termine com uma de produção ou de registro, e SEMPRE feche com a
+"chamada_final" de incentivo.
 
 ==================================================
-REGRAS DE OURO
+REGRAS VISUAIS
 ==================================================
 
-- DENSIDADE: 6 a 12 itens por página. Uma página com 1 ou 2 exercícios está ERRADA.
-  Antes de criar uma página nova, encha a atual.
-- UMA instrução por página, com no máximo 10 palavras, no imperativo:
-  "Complete as palavras." "Pinte as figuras com A." "Descubra o código."
-- NADA de enunciado por item. Na grade, a célula não tem pergunta: a instrução
-  do topo já diz o que fazer em todas.
-- PALAVRAS EM CAIXA ALTA, que é o padrão da alfabetização.
-- "imagem_prompt" é um OBJETO CONCRETO em até 5 palavras, em português.
-  NUNCA peça desenho de letra, sílaba ou palavra escrita: sai ilegível.
-  Toda célula da grade deveria ter figura, a menos que ela seja só uma letra.
-- Use as palavras e os temas que o PROFESSOR pediu. O hiperfoco do aluno entra na
-  escolha das palavras e das figuras, nunca mudando o conteúdo que foi pedido.
+- TUDO EM UMA PÁGINA. Use "largura":"metade" em quase todas as seções, para
+  caírem lado a lado. Reserve "inteira" para no máximo uma.
+- Entre 4 e 6 seções. Menos que isso deixa a folha vazia; mais, apertada.
+- Cores disponíveis: azul, verde, roxo, amarelo, laranja, cinza. Use cores
+  DIFERENTES em seções vizinhas, e repita a mesma cor quando duas partes da
+  folha se referem à mesma coisa.
+- Ícones são EMOJI no texto, não imagens: 📅 🕐 📍 👥 ❓ ✏️ 📝 💡 ⭐ 📣 🔎 💰
+- "imagem_prompt" aparece NO MÁXIMO em uma seção, a do tipo "info". É a cena do
+  tema, descrita em português e em até 8 palavras.
+- Enunciados curtos. O "subtitulo" de cada seção tem no máximo 10 palavras.
+
+==================================================
+A ADAPTAÇÃO AO ESTUDANTE
+==================================================
+
+O perfil acima decide o GRAU DE APOIO, não o visual:
+- Mais apoio: mais frases começadas, menos lacunas por frase, respostas por
+  marcar ou ligar em vez de escrever, checklist mais detalhado.
+- Menos apoio: lacunas maiores, perguntas abertas, menos modelo pronto.
+- Hiperfocos e interesses entram nos exemplos e na imagem, nunca mudando o
+  conteúdo que o professor pediu.
+- Se o estudante ainda não escreve, troque a seção de produção por uma de
+  "relacionar" ou "perguntas" com resposta por desenho.
 
 ==================================================
 O QUE O PROFESSOR PEDIU
@@ -153,17 +198,8 @@ O QUE O PROFESSOR PEDIU
 
 ${conteudo}
 
-Transforme isso numa folha com os arranjos acima. Preserve o conteúdo pedido:
-as mesmas palavras, as mesmas sílabas, o mesmo objetivo. O que você decide é a
-APRESENTAÇÃO.
-
-REGRAS DE PREENCHIMENTO:
-1. Entre 1 e 3 páginas. Só crie a segunda se a primeira estiver cheia.
-2. "colunas": 3 é o padrão; 2 se as palavras forem longas; 4 se forem curtas.
-3. "adaptacoes_aplicadas": uma frase por decisão, ligada ao perfil do estudante.
-4. "fonte" aceita exatamente um destes nomes, sem barras nem alternativas:
-   "Lexend" (quem ainda não lê com fluência) ou "Verdana" (os demais).
-4. Responda em português brasileiro nos textos voltados ao aluno.
+Preserve o conteúdo e o objetivo. O que você decide é a APRESENTAÇÃO: quais
+seções, em que ordem, com que cor e com quanto apoio.
 
 Responda APENAS com um JSON válido neste formato, sem markdown e sem cercas:
 ${ESQUEMA}`;
@@ -411,120 +447,56 @@ serve(async (req) => {
       return json({ error: "O modelo devolveu um formato inesperado. Tente de novo." }, 502, origin);
     }
 
-    // Teto de páginas garantido aqui, não no prompt: o modelo costuma estourar,
-    // transformando cada palavra numa página. Se passar do limite, os blocos são
-    // redistribuídos com a menor densidade que ainda caiba no teto, preservando a
-    // ordem e as instruções de cada página de origem.
+    // -------- Pós-processamento: o que não se confia ao modelo --------
     {
-      const pags = (folha.paginas ?? []) as PaginaBruta[];
-      if (pags.length > MAX_PAGINAS) {
-        const blocos: { bloco: unknown; instrucao?: string; primeiro: boolean }[] = [];
-        for (const p of pags) {
-          (p.blocos ?? []).forEach((b, i) => {
-            blocos.push({ bloco: b, instrucao: p.instrucoes, primeiro: i === 0 });
-          });
-        }
-        const porPagina = Math.ceil(blocos.length / MAX_PAGINAS);
-        const novas: PaginaBruta[] = [];
-        for (let i = 0; i < blocos.length; i += porPagina) {
-          const grupo = blocos.slice(i, i + porPagina);
-          const comInstrucao = grupo.find((g) => g.primeiro && g.instrucao);
-          novas.push({
-            instrucoes: comInstrucao?.instrucao ?? grupo[0].instrucao,
-            blocos: grupo.map((g) => g.bloco) as PaginaBruta["blocos"],
-          });
-        }
-        console.log(`folha reequilibrada: ${pags.length} -> ${novas.length} páginas`);
-        folha.paginas = novas;
-        const cfg = (folha.config ?? {}) as Record<string, unknown>;
-        cfg.itens_por_pagina = porPagina;
-        folha.config = cfg;
-      }
-    }
+      const secoes = (folha.secoes ?? []) as SecaoBruta[];
 
-    // Devolve as ilustrações aos blocos, na ordem em que apareciam no texto.
-    // O que o modelo tiver inventado em "imagem_prompt" é descartado: a descrição
-    // boa é a que veio da adaptação, que conhece o perfil do estudante.
-    {
-      const blocos: { imagem_prompt?: string; enunciado?: string }[] = [];
-      for (const p of ((folha.paginas ?? []) as PaginaBruta[])) {
-        for (const b of (p.blocos ?? [])) blocos.push(b);
-      }
-      // A descrição inventada pelo modelo da diagramação é SEMPRE descartada: foi
-      // ela que encheu uma atividade de dinossauros com desenhos de livro. Vale a
-      // que veio da adaptação, que conhece o perfil; e, na falta dela, uma derivada
-      // do próprio enunciado, que ao menos fala do que o exercício trata.
-      blocos.forEach((b, i) => {
-        const comp = b as { pares?: unknown[]; celulas?: unknown[] };
-        const temFilhos = (Array.isArray(comp.pares) && comp.pares.length > 0) ||
-          (Array.isArray(comp.celulas) && comp.celulas.length > 0);
-        // Grade e ligar têm figuras próprias, uma por célula/par.
-        if (temFilhos) { delete b.imagem_prompt; return; }
-        if (i < descImagens.length) {
-          b.imagem_prompt = descImagens[i];
+      // 1) Numeração sequencial. O modelo repete ou reinicia a contagem.
+      secoes.forEach((sec, i) => { sec.numero = i + 1; });
+
+      // 2) Ilustração: no máximo UMA, na seção "info". A descrição vinda da
+      //    adaptação vale mais que a inventada aqui, que já encheu folha de
+      //    dinossauro com desenho de livro.
+      let usada = false;
+      for (const sec of secoes) {
+        if (sec.tipo === "info" && !usada) {
+          if (descImagens.length > 0) sec.imagem_prompt = descImagens[0];
+          usada = !!sec.imagem_prompt;
         } else {
-          const base = (b.enunciado ?? "").replace(/\s+/g, " ").trim().slice(0, 90);
-          b.imagem_prompt = base
-            ? `ilustração do objeto principal citado nesta instrução escolar: "${base}". Desenhe apenas esse objeto, nada de texto.`
-            : "";
+          delete sec.imagem_prompt;
         }
-        if (!b.imagem_prompt) delete b.imagem_prompt;
-      });
-      console.log(`ilustrações: ${descImagens.length} do texto, ${Math.max(0, blocos.length - descImagens.length)} derivadas do enunciado`);
-    }
+      }
 
-    // O modelo chegou a copiar o exemplo do esquema literalmente e devolveu a fonte
-    // como "Lexend | Verdana", que não existe em lugar nenhum — o Word caiu numa
-    // serifada e a adaptação de leitura foi perdida. Normalizamos aqui.
-    {
+      // 3) Largura: só uma seção pode ocupar a página inteira, senão a folha
+      //    vira uma coluna só e estoura para a segunda página.
+      let inteiras = 0;
+      for (const sec of secoes) {
+        if (sec.largura === "inteira") {
+          inteiras += 1;
+          if (inteiras > 1) sec.largura = "metade";
+        }
+      }
+
+      // 4) Fonte: o modelo já devolveu "Lexend | Verdana", copiando o exemplo.
       const cfg = (folha.config ?? {}) as Record<string, unknown>;
       const bruta = String(cfg.fonte ?? "").toLowerCase();
       cfg.fonte = bruta.includes("lexend") ? "Lexend" : "Verdana";
+      const tam = Number(cfg.tamanho_pt);
+      cfg.tamanho_pt = Number.isFinite(tam) ? Math.min(14, Math.max(9, tam)) : 11;
       folha.config = cfg;
-    }
 
-    // Renumeração sequencial em toda a folha. O modelo costuma reiniciar a
-    // contagem a cada página ou repetir o mesmo número, e o renderizador tira a
-    // numeração que vem dentro do enunciado para não duplicar — então o número
-    // correto tem que sair daqui.
-    {
-      let n = 0;
-      const SEM_NUMERO = new Set(["grade", "legenda", "sequencia"]);
-      for (const p of ((folha.paginas ?? []) as PaginaBruta[])) {
-        for (const b of (p.blocos ?? []) as { numero?: number; formato?: string }[]) {
-          // A grade e a legenda são arranjos da página inteira, não "o exercício 3":
-          // uma bolinha numerada ao lado delas só polui.
-          if (SEM_NUMERO.has(b.formato ?? "")) { delete b.numero; continue; }
-          b.numero = ++n;
-        }
-      }
+      console.log(`folha: ${secoes.length} seções, ${secoes.filter((x) => x.imagem_prompt).length} ilustração`);
     }
 
     // Ilustrações embutidas em base64
     if (com_imagens !== false) {
-      const paginas = (folha.paginas ?? []) as { blocos?: { imagem_prompt?: string; imagem?: string }[] }[];
-      type Img = { imagem_prompt?: string; imagem?: string };
-      const alvos: Img[] = [];
-      for (const pag of paginas) {
-        for (const b of pag.blocos ?? []) {
-          // Num bloco "ligar", as figuras ficam nos pares, não no bloco.
-          const sub = (b as { pares?: Img[]; celulas?: Img[] });
-          const filhosImg = [...(sub.celulas ?? []), ...(sub.pares ?? [])];
-          if (filhosImg.length > 0) {
-            for (const f of filhosImg) {
-              if (f?.imagem_prompt && alvos.length < MAX_IMAGENS) alvos.push(f);
-            }
-            continue;
-          }
-          if (b.imagem_prompt && alvos.length < MAX_IMAGENS) alvos.push(b);
-        }
-      }
+      const alvos = ((folha.secoes ?? []) as SecaoBruta[]).filter((sec) => sec.imagem_prompt);
       const imagens = await Promise.all(
-        alvos.map((b) => baixarIlustracao(`${b.imagem_prompt!}, ${ESTILO_ILUSTRACAO}`, apiKey)),
+        alvos.map((sec) => baixarIlustracao(`${sec.imagem_prompt!}, ${ESTILO_ILUSTRACAO}`, apiKey)),
       );
-      alvos.forEach((b, i) => {
-        if (imagens[i]) b.imagem = imagens[i]!;
-        delete b.imagem_prompt;
+      alvos.forEach((sec, i) => {
+        if (imagens[i]) sec.imagem = imagens[i]!;
+        delete sec.imagem_prompt;
       });
     }
 
@@ -537,13 +509,7 @@ serve(async (req) => {
           ? folha.legenda_material.trim()
           : "Material da atividade",
       };
-      // Decisão nossa, não do modelo: se a folha tem mais de uma página, o
-      // material vai em todas. Perguntar "no último quadrinho..." numa página
-      // onde a tirinha não aparece obriga o aluno a ficar voltando a folha —
-      // exatamente o que a adaptação deveria evitar.
-      const cfg = (folha.config ?? {}) as Record<string, unknown>;
-      cfg.repetir_material = ((folha.paginas as unknown[]) ?? []).length > 1;
-      folha.config = cfg;
+
     }
     delete folha.legenda_material;
 
