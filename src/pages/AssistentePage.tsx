@@ -64,10 +64,34 @@ const COMPARE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/adapt-com
 const FOLHA_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gerar-folha`;
 
 /** Espelha a lista fixa validada no servidor (supabase/functions/adapt-compare). */
+/** Espelha o catálogo do servidor. "custo" é por adaptação (~2.500 tokens cada lado). */
 const MODELOS = [
-  { id: "openai/gpt-5-nano", nome: "GPT-5 Nano", detalhe: "mais rápido" },
-  { id: "openai/gpt-6-luna", nome: "GPT-6 Luna", detalhe: "mais capaz" },
+  { id: "openai/gpt-5-nano",    nome: "GPT-5 Nano",    detalhe: "US$ 0,0011", grupo: "Econômicos" },
+  { id: "openai/gpt-4.1-nano",  nome: "GPT-4.1 Nano",  detalhe: "US$ 0,0012", grupo: "Econômicos" },
+  { id: "openai/gpt-6-luna",    nome: "GPT-6 Luna",    detalhe: "US$ 0,0015", grupo: "Econômicos" },
+  { id: "openai/gpt-4o-mini",   nome: "GPT-4o Mini",   detalhe: "US$ 0,0019", grupo: "Econômicos" },
+  { id: "openai/gpt-5.6-luna",  nome: "GPT-5.6 Luna",  detalhe: "US$ 0,0035", grupo: "Intermediários" },
+  { id: "openai/gpt-5.4-nano",  nome: "GPT-5.4 Nano",  detalhe: "US$ 0,0036", grupo: "Intermediários" },
+  { id: "openai/gpt-4.1-mini",  nome: "GPT-4.1 Mini",  detalhe: "US$ 0,0050", grupo: "Intermediários" },
+  { id: "openai/gpt-5-mini",    nome: "GPT-5 Mini",    detalhe: "US$ 0,0056", grupo: "Intermediários" },
+  { id: "openai/gpt-5.4-mini",  nome: "GPT-5.4 Mini",  detalhe: "US$ 0,0131", grupo: "Intermediários" },
+  { id: "openai/gpt-6.1-terra", nome: "GPT-6.1 Terra", detalhe: "US$ 0,0150", grupo: "Intermediários" },
+  { id: "openai/gpt-4.1",       nome: "GPT-4.1",       detalhe: "US$ 0,0250", grupo: "Completos" },
+  { id: "openai/gpt-5",         nome: "GPT-5",         detalhe: "US$ 0,0281", grupo: "Completos" },
+  { id: "openai/gpt-5.1",       nome: "GPT-5.1",       detalhe: "US$ 0,0281", grupo: "Completos" },
+  { id: "openai/gpt-6-sol",     nome: "GPT-6 Sol",     detalhe: "US$ 0,0300", grupo: "Completos" },
+  { id: "openai/gpt-4o",        nome: "GPT-4o",        detalhe: "US$ 0,0312", grupo: "Completos" },
+  { id: "openai/gpt-5.2",       nome: "GPT-5.2",       detalhe: "US$ 0,0394", grupo: "Completos" },
+  { id: "openai/gpt-5.4",       nome: "GPT-5.4",       detalhe: "US$ 0,0437", grupo: "Completos" },
+  { id: "openai/gpt-5.5",       nome: "GPT-5.5",       detalhe: "US$ 0,0875", grupo: "Topo" },
+  { id: "openai/gpt-6-astra",   nome: "GPT-6 Astra",   detalhe: "US$ 0,1500", grupo: "Topo" },
+  { id: "openai/gpt-5-pro",     nome: "GPT-5 Pro",     detalhe: "US$ 0,3375", grupo: "Topo" },
 ] as const;
+
+/** Quantos modelos podem rodar na mesma comparação. */
+const MAX_MODELOS_SEL = 4;
+/** Seleção inicial: o mais barato e o melhor custo-benefício medido. */
+const MODELOS_PADRAO = ["openai/gpt-5-nano", "openai/gpt-6-luna"];
 
 const MAX_ARQUIVO_MB = 4;
 
@@ -148,7 +172,7 @@ const AssistentePage = () => {
   const [orientacaoAberta, setOrientacaoAberta] = useState<string | null>(null);
   const [exportandoFolha, setExportandoFolha] = useState<string | null>(null);
   const [alunoId, setAlunoId] = useState<string>("");
-  const [modelosSel, setModelosSel] = useState<string[]>(MODELOS.map((m) => m.id));
+  const [modelosSel, setModelosSel] = useState<string[]>([...MODELOS_PADRAO]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -881,22 +905,28 @@ const AssistentePage = () => {
         im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = r; })
       ));
 
-      // Garantia de página única: o modelo às vezes escreve demais e a folha
-      // passa dos 1123px do A4, cortando a chamada final na impressão. Em vez
-      // de perder conteúdo, a folha inteira encolhe o suficiente para caber.
-      const A4 = 1123;
+      // O contêiner tem SEMPRE a proporção exata de um A4. A captura é feita
+      // nele, nunca no elemento interno: capturando o interno, o canvas saía
+      // com outra proporção e o addImage, que força 210x297mm, esticava a folha
+      // só na horizontal — círculos viravam ovais e quadrados, retângulos.
+      const LARG = 794, ALT = 1123;
+      host.style.width = `${LARG}px`;
+      host.style.height = `${ALT}px`;
+      host.style.overflow = "hidden";
+
+      // Garantia de página única: se o conteúdo passa do A4, a folha encolhe
+      // proporcionalmente para caber, em vez de perder a parte de baixo.
       const alvo = host.firstElementChild as HTMLElement;
-      if (alvo.scrollHeight > A4) {
-        const fator = Math.max(0.72, A4 / alvo.scrollHeight);
-        alvo.style.transform = `scale(${fator})`;
+      const altura = alvo.scrollHeight;
+      if (altura > ALT) {
+        const fator = Math.max(0.68, ALT / altura);
         alvo.style.transformOrigin = "top left";
-        alvo.style.width = `${794 / fator}px`;
-        host.style.width = "794px";
-        host.style.height = `${A4}px`;
-        host.style.overflow = "hidden";
+        alvo.style.transform = `scale(${fator})`;
         await new Promise((r) => setTimeout(r, 60));
       }
-      return await html2canvas(host.firstElementChild as HTMLElement, {
+
+      return await html2canvas(host, {
+        width: LARG, height: ALT, windowWidth: LARG, windowHeight: ALT,
         scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false,
       });
     } finally {
@@ -1424,38 +1454,52 @@ const AssistentePage = () => {
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" size="sm" className="h-9 gap-2 text-sm">
                     <Cpu className="h-4 w-4 text-muted-foreground" />
-                    {modelosSel.length === MODELOS.length
-                      ? "Os 2 modelos"
-                      : modelosSel.length === 1
+                    {modelosSel.length === 1
                       ? MODELOS.find((m) => m.id === modelosSel[0])?.nome
                       : `${modelosSel.length} modelos`}
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-56">
-                  {MODELOS.map((m) => {
-                    const ativo = modelosSel.includes(m.id);
-                    return (
-                      <DropdownMenuItem
-                        key={m.id}
-                        onSelect={(e) => {
-                          e.preventDefault();
-                          setModelosSel((prev) =>
-                            prev.includes(m.id) ? prev.filter((x) => x !== m.id) : [...prev, m.id],
-                          );
-                        }}
-                        className="gap-2"
-                      >
-                        <span className="w-4 shrink-0">
-                          {ativo && <Check className="h-4 w-4 text-primary" />}
-                        </span>
-                        <span className="flex-1">{m.nome}</span>
-                        <span className="text-[11px] text-muted-foreground">{m.detalhe}</span>
-                      </DropdownMenuItem>
-                    );
-                  })}
+                <DropdownMenuContent align="start" className="w-72 max-h-[26rem] overflow-y-auto">
+                  <div className="px-2 py-1.5 text-[11px] text-muted-foreground border-b border-border mb-1">
+                    {modelosSel.length} de {MAX_MODELOS_SEL} · custo por adaptação
+                  </div>
+                  {["Econômicos", "Intermediários", "Completos", "Topo"].map((grupo) => (
+                    <div key={grupo}>
+                      <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {grupo}
+                      </div>
+                      {MODELOS.filter((m) => m.grupo === grupo).map((m) => {
+                        const ativo = modelosSel.includes(m.id);
+                        // Com o catálogo aberto, o teto evita comparação longa e cara
+                        // sem querer: 20 modelos de uma vez passariam de 5 minutos.
+                        const cheio = !ativo && modelosSel.length >= MAX_MODELOS_SEL;
+                        return (
+                          <DropdownMenuItem
+                            key={m.id}
+                            disabled={cheio}
+                            onSelect={(e) => {
+                              e.preventDefault();
+                              setModelosSel((prev) =>
+                                prev.includes(m.id)
+                                  ? (prev.length > 1 ? prev.filter((x) => x !== m.id) : prev)
+                                  : prev.length < MAX_MODELOS_SEL ? [...prev, m.id] : prev,
+                              );
+                            }}
+                            className="gap-2"
+                          >
+                            <span className="w-4 shrink-0">
+                              {ativo && <Check className="h-4 w-4 text-primary" />}
+                            </span>
+                            <span className="flex-1">{m.nome}</span>
+                            <span className="text-[11px] text-muted-foreground tabular-nums">{m.detalhe}</span>
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </div>
+                  ))}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => setModelosSel(MODELOS.map((m) => m.id))}>
-                    Selecionar os 2
+                  <DropdownMenuItem onSelect={() => setModelosSel([...MODELOS_PADRAO])}>
+                    Voltar ao padrão
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

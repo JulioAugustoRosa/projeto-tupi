@@ -12,26 +12,38 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 // `reasoning` é essencial aqui: gpt-5-nano tem raciocínio OBRIGATÓRIO e o
 // claude-haiku-5.5 usa esforço "medium" por padrão. Sem baixar o esforço, os
 // dois consomem todo o max_tokens pensando e devolvem conteúdo vazio.
-// Dois degraus para comparar qualidade contra custo na mesma tarefa.
-// O Luna é de geração mais nova que o Nano, 2,6x mais contexto e raciocínio
-// opcional, por um custo próximo.
-// Os três têm raciocínio OBRIGATÓRIO; nos menores ele é mantido no mínimo para
-// não consumir o orçamento de tokens antes de escrever a resposta.
+// Catálogo completo dos modelos GPT disponíveis para comparação.
+// "reasoning" é fixado em todos que o suportam: quando o padrão da família é
+// "medium", os tokens de raciocínio saem do mesmo teto da resposta e o modelo
+// devolve conteúdo vazio — foi assim que o GPT-5 Nano falhou na primeira versão.
 const MODELOS_PERMITIDOS: Record<string, { nome: string; reasoning?: Record<string, unknown> }> = {
-  "openai/gpt-5-nano": {
-    nome: "GPT-5 Nano",
-    reasoning: { effort: "minimal" },
-  },
-  "openai/gpt-6-luna": {
-    nome: "GPT-6 Luna",
-    // Raciocínio é opcional nesta família, mas o padrão é "medium": sem fixar
-    // em "low", o modelo gastaria o orçamento de tokens pensando, como fazia o
-    // gpt-5-mini, cujo raciocínio era obrigatório.
-    reasoning: { effort: "low" },
-  },
+  // --- econômicos ---
+  "openai/gpt-5-nano":     { nome: "GPT-5 Nano",    reasoning: { effort: "minimal" } },
+  "openai/gpt-4.1-nano":   { nome: "GPT-4.1 Nano" },
+  "openai/gpt-6-luna":     { nome: "GPT-6 Luna",    reasoning: { effort: "low" } },
+  "openai/gpt-4o-mini":    { nome: "GPT-4o Mini" },
+  // --- intermediários ---
+  "openai/gpt-5.6-luna":   { nome: "GPT-5.6 Luna",  reasoning: { effort: "low" } },
+  "openai/gpt-5.4-nano":   { nome: "GPT-5.4 Nano",  reasoning: { effort: "low" } },
+  "openai/gpt-4.1-mini":   { nome: "GPT-4.1 Mini" },
+  "openai/gpt-5-mini":     { nome: "GPT-5 Mini",    reasoning: { effort: "low" } },
+  "openai/gpt-5.4-mini":   { nome: "GPT-5.4 Mini",  reasoning: { effort: "low" } },
+  "openai/gpt-6.1-terra":  { nome: "GPT-6.1 Terra", reasoning: { effort: "low" } },
+  // --- completos ---
+  "openai/gpt-4.1":        { nome: "GPT-4.1" },
+  "openai/gpt-5":          { nome: "GPT-5",         reasoning: { effort: "low" } },
+  "openai/gpt-5.1":        { nome: "GPT-5.1",       reasoning: { effort: "low" } },
+  "openai/gpt-6-sol":      { nome: "GPT-6 Sol",     reasoning: { effort: "low" } },
+  "openai/gpt-4o":         { nome: "GPT-4o" },
+  "openai/gpt-5.2":        { nome: "GPT-5.2",       reasoning: { effort: "low" } },
+  "openai/gpt-5.4":        { nome: "GPT-5.4",       reasoning: { effort: "low" } },
+  // --- topo (custo alto; use com parcimônia) ---
+  "openai/gpt-5.5":        { nome: "GPT-5.5",       reasoning: { effort: "low" } },
+  "openai/gpt-6-astra":    { nome: "GPT-6 Astra",   reasoning: { effort: "low" } },
+  "openai/gpt-5-pro":      { nome: "GPT-5 Pro",     reasoning: { effort: "low" } },
 };
 
-const MAX_MODELOS = 2;
+const MAX_MODELOS = 4;  // teto por comparação, mesmo com o catálogo aberto
 const MAX_TEXTO = 8000;          // caracteres do enunciado digitado
 const MAX_ARQUIVO_BYTES = 4_000_000; // ~4 MB por arquivo, já em base64 decodificado
 const MAX_ARQUIVOS = 2;
