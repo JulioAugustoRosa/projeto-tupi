@@ -1,5 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  type DadosEstudante,
+  montarPromptAtividade,
+} from "../_shared/prompts/atividade-adaptada.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,68 +49,63 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Atividade não encontrada" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Fetch student profiles if applicable
-    let alunoContext = "";
+    // Dados do estudante (ou da turma) que alimentam o prompt compartilhado.
+    const est: DadosEstudante = { nome: "estudante não identificado" };
     if (aluno_id) {
       const [alunoRes, necRes, perfilRes] = await Promise.all([
-        supabase.from("alunos").select("nome, idade, serie").eq("id", aluno_id).single(),
+        supabase.from("alunos").select("nome, idade, serie").eq("id", aluno_id).maybeSingle(),
         supabase.from("necessidades_educacionais").select("condicao, nivel_suporte, detalhes").eq("aluno_id", aluno_id),
-        supabase.from("perfil_pedagogico").select("*").eq("aluno_id", aluno_id).single(),
+        supabase.from("perfil_pedagogico").select("*").eq("aluno_id", aluno_id).maybeSingle(),
       ]);
       const aluno = alunoRes.data;
       const necs = necRes.data ?? [];
       const perfil = perfilRes.data;
       if (aluno) {
-        alunoContext = `\nALUNO: ${aluno.nome}, ${aluno.idade || "?"} anos, série ${aluno.serie || "?"}.`;
+        est.nome = aluno.nome;
+        est.idade = aluno.idade ?? null;
+        est.serie = aluno.serie ?? null;
         if (necs.length > 0) {
-          alunoContext += `\nCondições: ${necs.map(n => `${n.condicao}${n.nivel_suporte ? ` (suporte: ${n.nivel_suporte})` : ""}`).join(", ")}.`;
+          est.condicoes = necs.map((n) =>
+            `${n.condicao}${n.nivel_suporte ? ` (suporte: ${n.nivel_suporte})` : ""}`
+          ).join("; ");
         }
         if (perfil) {
-          const parts = [];
-          if (perfil.preferencias_aprendizagem) parts.push(`preferências: ${perfil.preferencias_aprendizagem}`);
-          if (perfil.dificuldades) parts.push(`dificuldades: ${perfil.dificuldades}`);
-          if (perfil.facilidades) parts.push(`facilidades: ${perfil.facilidades}`);
-          if (perfil.hiperfocos) parts.push(`hiperfocos: ${perfil.hiperfocos}`);
-          if (perfil.estrategias_funcionam) parts.push(`estratégias: ${perfil.estrategias_funcionam}`);
-          if (perfil.comportamento) parts.push(`comportamento: ${perfil.comportamento}`);
-          if (parts.length > 0) alunoContext += `\nPerfil pedagógico: ${parts.join("; ")}.`;
+          const campos: [string, string][] = [
+            ["nível de aprendizagem", perfil.nivel_aprendizagem],
+            ["preferências de aprendizagem", perfil.preferencias_aprendizagem],
+            ["dificuldades", perfil.dificuldades],
+            ["facilidades", perfil.facilidades],
+            ["hiperfocos", perfil.hiperfocos],
+            ["interesses", perfil.interesses_pessoais],
+            ["estratégias que funcionam", perfil.estrategias_funcionam],
+            ["comportamento", perfil.comportamento],
+            ["dificuldades específicas", perfil.dificuldades_especificas],
+            ["observações do professor", perfil.observacoes_pedagogicas],
+          ];
+          est.perfil = campos.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join("; ");
         }
       }
     } else if (turma_id) {
       const { data: alunos } = await supabase.from("alunos").select("id, nome").eq("turma_id", turma_id);
       if (alunos && alunos.length > 0) {
-        alunoContext = `\nTURMA com ${alunos.length} alunos: ${alunos.map(a => a.nome).join(", ")}.`;
+        est.nome = `turma de ${alunos.length} estudantes (${alunos.map((a) => a.nome).join(", ")})`;
       }
     }
 
-    const systemPrompt = `Você é o Adaptador de Atividades do TUPI, especialista em Desenho Universal para Aprendizagem (DUA).
+    // Regras pedagógicas compartilhadas com a adapt-compare.
+    const conteudoOriginal = [
+      `Título: ${atividade.titulo}`,
+      atividade.disciplina ? `Disciplina: ${atividade.disciplina}` : "",
+      atividade.descricao ? `Conteúdo: ${atividade.descricao}` : "",
+      tipo_adaptacao ? `Tipo de adaptação pedido: ${tipo_adaptacao}` : "",
+    ].filter(Boolean).join("\n");
 
-Sua tarefa é criar um PLANO DE AULA ADAPTADO ou VERSÃO ADAPTADA da atividade original. Você NÃO altera o conteúdo pedagógico da atividade — você adapta a FORMA DE APRESENTAÇÃO, a METODOLOGIA e as ESTRATÉGIAS DE ENSINO.
-
-ATIVIDADE ORIGINAL:
-Título: ${atividade.titulo}
-Disciplina: ${atividade.disciplina || "Não especificada"}
-Descrição/Conteúdo: ${atividade.descricao || "Não fornecido"}
-${alunoContext}
-
-${instrucoes_professor ? `INSTRUÇÕES DO PROFESSOR: ${instrucoes_professor}` : ""}
-
-TIPO DE ADAPTAÇÃO: ${tipo_adaptacao || "geral"}
-
-INSTRUÇÕES:
-1. NUNCA altere o conteúdo original da atividade.
-2. Adapte a FORMA como a atividade é apresentada ao aluno.
-3. Considere os princípios do DUA: múltiplas formas de engajamento, representação e ação/expressão.
-4. Forneça:
-   - Objetivos pedagógicos da adaptação
-   - Materiais necessários
-   - Passo a passo da aplicação
-   - Estratégias de mediação para o professor
-   - Critérios de avaliação adaptados
-   - Sugestões de recursos visuais, táteis ou tecnológicos
-5. Se o professor deu instruções específicas, siga-as.
-6. Responda em português brasileiro.
-7. Use markdown para formatar.`;
+    const systemPrompt = montarPromptAtividade({
+      estudante: est,
+      professor: { instrucoes: (instrucoes_professor ?? "").trim() },
+      conteudo_original: conteudoOriginal,
+      tem_material_anexado: false,
+    });
 
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY não configurada");

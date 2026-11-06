@@ -1,0 +1,9 @@
+{
+  "_instrucoes": "Preencha 'link' (URL da issue) e 'status' depois de abrir a issue no GitHub e rode novamente: docs/security-audit/.venv/bin/python docs/security-audit/gerar_relatorio.py",
+  "data": "22/09/2026",
+  "proprietario": "Júlio Augusto Rosa — autor e mantenedor do TUPI (repositório privado JulioAugustoRosa/projeto-tupi)",
+  "canal": "GitHub Issues do repositório privado (acesso restrito ao mantenedor e colaboradores) — canal responsável, sem divulgação pública de detalhes exploráveis",
+  "link": "PENDENTE — inserir a URL da issue aberta",
+  "status": "Pendente de abertura da issue",
+  "resumo_mensagem": "Comunicação ao mantenedor dos 9 achados da auditoria, com prioridade para: (1) bucket de storage público com leitura/listagem anônima; (2) credenciais reais de usuários versionadas em scripts; (3) injeção de HTML na função render-worksheet. Solicitado: tornar o bucket privado, rotacionar as senhas afetadas e remover as credenciais do histórico, corrigir/remover render-worksheet. Detalhes técnicos enviados apenas pelo canal privado."
+}

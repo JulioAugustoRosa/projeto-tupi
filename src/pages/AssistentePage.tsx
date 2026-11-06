@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, FileText, Eye, ChevronRight, GraduationCap, Cpu, Check, Sparkles, AlertCircle } from "lucide-react";
+import { Send, Bot, User, Paperclip, X, Loader2, MoreVertical, Plus, MessageSquare, Trash2, Pencil, Download, FileText, Eye, ChevronRight, GraduationCap, Cpu, Check, Sparkles, AlertCircle, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import ReactMarkdown from "react-markdown";
@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
@@ -42,7 +44,26 @@ interface ResultadoModelo {
   conteudo?: string;
   erro?: string;
   ms: number;
+  /** Conferências que o servidor faz por código. Não impedem o uso da adaptação. */
+  inconsistencias?: { dimensao: string; descricao: string }[];
 }
+
+/** Opções do professor que entram na geração (Etapa 4 do plano pedagógico). */
+interface OpcoesProfessor {
+  preservar_texto_original: boolean;
+  quantidade_questoes: string;
+  caixa_alta: boolean;
+  imagens: boolean;
+  formato_preferido: string;
+}
+
+const OPCOES_PADRAO: OpcoesProfessor = {
+  preservar_texto_original: false,
+  quantidade_questoes: "",
+  caixa_alta: false,
+  imagens: true,
+  formato_preferido: "",
+};
 
 interface Message {
   id: string;
@@ -173,6 +194,7 @@ const AssistentePage = () => {
   const [exportandoFolha, setExportandoFolha] = useState<string | null>(null);
   const [alunoId, setAlunoId] = useState<string>("");
   const [modelosSel, setModelosSel] = useState<string[]>([...MODELOS_PADRAO]);
+  const [opcoes, setOpcoes] = useState<OpcoesProfessor>({ ...OPCOES_PADRAO });
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -362,10 +384,25 @@ const AssistentePage = () => {
           texto: enunciado,
           arquivos,
           modelos: modelosSel,
+          preservar_texto_original: opcoes.preservar_texto_original,
+          quantidade_questoes: Number(opcoes.quantidade_questoes) || undefined,
+          caixa_alta: opcoes.caixa_alta,
+          imagens: opcoes.imagens,
+          formato_preferido: opcoes.formato_preferido.trim() || undefined,
         }),
       });
 
       const result = await resp.json().catch(() => ({}));
+      if (resp.status === 409 && result.tipo === "contradicao") {
+        // O pedido se contradiz. Perguntar é melhor que escolher por conta própria.
+        toast({
+          title: "Seu pedido precisa de um ajuste",
+          description: <span className="whitespace-pre-line">{result.error}</span>,
+          duration: 15000,
+        });
+        setIsLoading(false);
+        return;
+      }
       if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
 
       const resultados: ResultadoModelo[] = result.resultados ?? [];
@@ -838,6 +875,15 @@ const AssistentePage = () => {
    * Prepara as três folhas em segundo plano, assim que as adaptações chegam.
    * Não bloqueia: o professor já lê os textos enquanto as folhas ficam prontas.
    */
+  // Quantas opções o professor mudou do padrão — alimenta o selo do botão.
+  const qtdOpcoesAtivas = [
+    opcoes.preservar_texto_original,
+    opcoes.caixa_alta,
+    !opcoes.imagens,
+    Boolean(opcoes.quantidade_questoes.trim()),
+    Boolean(opcoes.formato_preferido.trim()),
+  ].filter(Boolean).length;
+
   const prepararFolhas = async (msgId: string, msg: Message, resultados: ResultadoModelo[]) => {
     const validos = resultados.filter((r) => r.conteudo && !r.erro);
     if (validos.length === 0 || !msg.alunoId) return;
@@ -1262,6 +1308,24 @@ const AssistentePage = () => {
                               const aberta = orientacaoAberta === msg.id + r.modelo;
                               return (
                                 <>
+                                  {/* Conferências feitas por código no servidor. Avisam, não bloqueiam:
+                                      a decisão de aceitar a adaptação continua sendo do professor. */}
+                                  {r.inconsistencias && r.inconsistencias.length > 0 && (
+                                    <div className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
+                                      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                                        <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                                        Confira antes de imprimir
+                                      </div>
+                                      <ul className="mt-1.5 space-y-1">
+                                        {r.inconsistencias.map((inc, i) => (
+                                          <li key={i} className="text-xs leading-snug text-foreground/80">
+                                            <span className="text-muted-foreground">{inc.dimensao}:</span>{" "}
+                                            {inc.descricao}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
                                   <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-headings:my-2 prose-headings:text-sm prose-a:text-primary">
                                     <ReactMarkdown>{stripPreamble(atividade)}</ReactMarkdown>
                                   </div>
@@ -1501,6 +1565,99 @@ const AssistentePage = () => {
                   <DropdownMenuItem onSelect={() => setModelosSel([...MODELOS_PADRAO])}>
                     Voltar ao padrão
                   </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {alunoId && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 gap-2 text-sm">
+                    <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                    Como adaptar
+                    {qtdOpcoesAtivas > 0 && (
+                      <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                        {qtdOpcoesAtivas}
+                      </span>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-80 p-3 space-y-3">
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    O conteúdo é sempre seu. Aqui você define como a IA pode apresentá-lo.
+                  </p>
+
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="opt-preservar" className="text-sm">Preservar o texto original</Label>
+                      <p className="text-[11px] leading-snug text-muted-foreground">
+                        Copia o texto palavra por palavra. Adapta só apresentação,
+                        apoio e forma de responder.
+                      </p>
+                    </div>
+                    <Switch
+                      id="opt-preservar"
+                      checked={opcoes.preservar_texto_original}
+                      onCheckedChange={(v) =>
+                        setOpcoes((o) => ({ ...o, preservar_texto_original: v }))}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="opt-caixa" className="text-sm">Caixa alta</Label>
+                    <Switch
+                      id="opt-caixa"
+                      checked={opcoes.caixa_alta}
+                      onCheckedChange={(v) => setOpcoes((o) => ({ ...o, caixa_alta: v }))}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor="opt-imagens" className="text-sm">Com ilustrações</Label>
+                    <Switch
+                      id="opt-imagens"
+                      checked={opcoes.imagens}
+                      onCheckedChange={(v) => setOpcoes((o) => ({ ...o, imagens: v }))}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="opt-qtd" className="text-sm">Quantidade de questões</Label>
+                    <Input
+                      id="opt-qtd"
+                      type="number"
+                      min={1}
+                      max={20}
+                      placeholder="a IA decide"
+                      value={opcoes.quantidade_questoes}
+                      onChange={(e) =>
+                        setOpcoes((o) => ({ ...o, quantidade_questoes: e.target.value }))}
+                      className="h-8"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="opt-formato" className="text-sm">Formato desejado</Label>
+                    <Input
+                      id="opt-formato"
+                      placeholder="ex.: banco de palavras, duas páginas"
+                      value={opcoes.formato_preferido}
+                      onChange={(e) =>
+                        setOpcoes((o) => ({ ...o, formato_preferido: e.target.value }))}
+                      className="h-8"
+                    />
+                  </div>
+
+                  {qtdOpcoesAtivas > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full h-8 text-xs"
+                      onClick={() => setOpcoes({ ...OPCOES_PADRAO })}
+                    >
+                      Limpar opções
+                    </Button>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
