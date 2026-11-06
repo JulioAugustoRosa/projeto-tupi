@@ -259,7 +259,7 @@ function extrairImagens(texto: string): { limpo: string; descricoes: string[] } 
   return { limpo: limpo.replace(/[ \t]{2,}/g, " ").trim(), descricoes };
 }
 
-const MODELO_IMAGEM = "google/gemini-2.5-flash-image";
+const MODELO_IMAGEM = "google/gemini-3-pro-image";
 let ultimoErroImagem = "";
 
 /**

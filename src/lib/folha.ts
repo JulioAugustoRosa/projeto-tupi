@@ -124,18 +124,21 @@ function conteudoSecao(s: SecaoFolha, pt: number): string {
 
   switch (s.tipo) {
     case "info": {
+      // As ilustrações chegam em 1.83:1. Num espaço quadrado com "cover", as
+      // laterais eram cortadas e o letreiro da cena sumia. A figura passa a
+      // ocupar a largura toda do card, acima dos dados, respeitando a proporção.
       const img = s.imagem
-        ? `<img src="${s.imagem}" alt="" style="width:${pt * 15}px;height:${pt * 15}px;object-fit:cover;border-radius:12px;border:3px solid ${c.borda};flex:none;" />`
+        ? `<img src="${s.imagem}" alt="" style="display:block;width:100%;height:auto;max-height:${pt * 9.5}px;
+             object-fit:contain;border-radius:10px;margin-bottom:${pt * 0.5}px;" />`
         : "";
       const linhas = (s.dados ?? []).map((d) =>
         `<div style="display:flex;gap:6px;align-items:baseline;margin-bottom:3px;">
            <span style="flex:none;">${esc(d.icone || "•")}</span>
            <span><b>${esc(d.rotulo)}:</b> ${esc(d.valor)}</span>
          </div>`).join("");
-      return `<div style="display:flex;gap:${pt}px;align-items:flex-start;background:${PALETA.creme.fundo};
-          border-radius:12px;padding:${pt * 0.6}px;">
+      return `<div style="background:${PALETA.creme.fundo};border-radius:12px;padding:${pt * 0.6}px;">
         ${img}
-        <div style="flex:1;font-size:${peq}pt;line-height:1.4;">
+        <div style="font-size:${peq}pt;line-height:1.4;">
           ${s.destaque ? `<p style="margin:0 0 6px;">${esc(s.destaque)}</p>` : ""}
           ${linhas}
         </div>
@@ -201,7 +204,7 @@ function secaoHtml(s: SecaoFolha, pt: number): string {
   // o texto da própria seção. mix-blend-multiply some com o fundo branco do PNG.
   const figura = (s.imagem && s.tipo !== "info")
     ? `<div style="text-align:right;margin-top:${pt * 0.3}px;">
-         <img src="${s.imagem}" alt="" style="width:${pt * 6.5}px;height:${pt * 6.5}px;object-fit:contain;mix-blend-mode:multiply;" />
+         <img src="${s.imagem}" alt="" style="width:${pt * 11}px;height:auto;max-height:${pt * 6}px;object-fit:contain;mix-blend-mode:multiply;" />
        </div>`
     : "";
   return `<section style="grid-column:${inteira ? "1 / -1" : "auto"};border:3px solid ${c.borda};
@@ -242,7 +245,7 @@ export function paginaHtml(folha: Folha | null | undefined, _idx = 0): string {
              border-radius:999px;padding:7px ${pt * 1.2}px;font-weight:800;font-size:${(pt * 1.15).toFixed(1)}pt;display:flex;align-items:center;white-space:nowrap;">${esc(folha.etiqueta)}</div>` : ""}
         ${folha.convite ? `<div style="flex:1;background:${PALETA.azul.fundo};border:2.5px solid ${PALETA.azul.borda};color:${PALETA.azul.texto};
              border-radius:14px;padding:7px ${pt * 0.9}px;font-size:${(pt * 0.86).toFixed(1)}pt;font-weight:600;display:flex;align-items:center;text-align:center;justify-content:center;">${esc(folha.convite)}</div>` : ""}
-        ${folha.ilustracao_topo?.imagem ? `<img src="${folha.ilustracao_topo.imagem}" alt="" style="width:${pt * 6.5}px;height:${pt * 6.5}px;object-fit:contain;flex:none;mix-blend-mode:multiply;" />` : ""}
+        ${folha.ilustracao_topo?.imagem ? `<img src="${folha.ilustracao_topo.imagem}" alt="" style="width:${pt * 10}px;height:auto;max-height:${pt * 5.5}px;object-fit:contain;flex:none;mix-blend-mode:multiply;" />` : ""}
       </div>`
     : "";
 
@@ -260,7 +263,7 @@ export function paginaHtml(folha: Folha | null | undefined, _idx = 0): string {
           <div style="font-weight:800;color:${PALETA.amarelo.texto};font-size:${(pt * 1.35).toFixed(1)}pt;">${esc(folha.chamada_final?.titulo ?? "")}</div>
           ${folha.chamada_final?.texto ? `<div style="font-size:${(pt * 0.82).toFixed(1)}pt;color:#5C3604;margin-top:3px;">${esc(folha.chamada_final.texto)}</div>` : ""}
         </div>
-        ${folha.chamada_final?.imagem ? `<img src="${folha.chamada_final.imagem}" alt="" style="width:${pt * 7}px;height:${pt * 7}px;object-fit:contain;flex:none;mix-blend-mode:multiply;" />` : ""}
+        ${folha.chamada_final?.imagem ? `<img src="${folha.chamada_final.imagem}" alt="" style="width:${pt * 11}px;height:auto;max-height:${pt * 6}px;object-fit:contain;flex:none;mix-blend-mode:multiply;" />` : ""}
       </div>`
     : "";
 
