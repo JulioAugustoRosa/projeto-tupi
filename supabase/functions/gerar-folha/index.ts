@@ -260,6 +260,7 @@ function extrairImagens(texto: string): { limpo: string; descricoes: string[] } 
 }
 
 const MODELO_IMAGEM = "google/gemini-2.5-flash-image";
+let ultimoErroImagem = "";
 
 /**
  * Gera uma ilustração pela OpenRouter e devolve como data URL.
@@ -288,7 +289,9 @@ async function baixarIlustracao(prompt: string, apiKey: string): Promise<string 
     });
 
     if (!r.ok) {
-      console.error(`ilustração HTTP ${r.status}: ${(await r.text().catch(() => "")).slice(0, 200)}`);
+      const corpo = (await r.text().catch(() => "")).slice(0, 300);
+      console.error(`ilustração HTTP ${r.status}: ${corpo}`);
+      ultimoErroImagem = `HTTP ${r.status}: ${corpo}`;
       return null;
     }
 
@@ -303,10 +306,13 @@ async function baixarIlustracao(prompt: string, apiKey: string): Promise<string 
         if (typeof u === "string" && u.startsWith("data:")) return u;
       }
     }
-    console.error("ilustração sem imagem:", JSON.stringify(data).slice(0, 250));
+    const amostra = JSON.stringify(data).slice(0, 300);
+    console.error("ilustração sem imagem:", amostra);
+    ultimoErroImagem = `sem imagem: ${amostra}`;
     return null;
   } catch (e) {
     console.error("ilustração falhou:", (e as Error).message);
+    ultimoErroImagem = `exceção: ${(e as Error).message}`;
     return null;
   } finally {
     clearTimeout(timer);
@@ -526,6 +532,15 @@ serve(async (req) => {
         if (imagens[i]) sec.imagem = imagens[i]!;
         delete sec.imagem_prompt;
       });
+      // Falha de ilustração não derruba a folha, mas também não pode passar em
+      // silêncio: sem aviso, o professor vê a folha sem figura e acha que o
+      // sistema é assim mesmo.
+      const obtidas = imagens.filter(Boolean).length;
+      if (obtidas < alvos.length) {
+        folha.aviso_imagens = ultimoErroImagem.includes("402")
+          ? "As ilustrações não foram geradas: a OpenRouter exige pelo menos US$ 1,00 de folga no limite da chave para gerar imagem. Aumente o limite em openrouter.ai/settings/keys ou adicione créditos."
+          : `Só ${obtidas} de ${alvos.length} ilustrações foram geradas. Tente novamente em alguns instantes.`;
+      }
     }
 
     // O material anexado é embutido pelo servidor, não pelo modelo: assim ele

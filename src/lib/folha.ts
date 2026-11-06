@@ -93,6 +93,8 @@ export interface Folha {
   material_original?: MaterialOriginal;
   /** figura ao lado do balão de convite, ex: um megafone */
   ilustracao_topo?: Ilustracao;
+  /** preenchido quando alguma ilustração falhou, para avisar o professor */
+  aviso_imagens?: string;
   secoes?: SecaoFolha[];
   chamada_final?: { titulo?: string; texto?: string; imagem?: string; imagem_prompt?: string };
 }

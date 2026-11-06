@@ -1516,6 +1516,13 @@ const AssistentePage = () => {
             </DialogDescription>
           </DialogHeader>
 
+          {folha?.aviso_imagens && (
+            <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 flex gap-2 items-start">
+              <AlertCircle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+              <p className="text-xs text-foreground">{folha.aviso_imagens}</p>
+            </div>
+          )}
+
           {(folha?.adaptacoes_aplicadas ?? []).length > 0 && (
             <div className="rounded-xl border border-border bg-muted/40 p-4">
               <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
