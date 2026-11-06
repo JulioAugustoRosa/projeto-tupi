@@ -172,7 +172,12 @@ REGRAS VISUAIS
 
 - TUDO EM UMA PÁGINA. Use "largura":"metade" em quase todas as seções, para
   caírem lado a lado. Reserve "inteira" para no máximo uma.
-- Entre 4 e 6 seções. Menos que isso deixa a folha vazia; mais, apertada.
+- Entre 4 e 5 seções. Menos que isso deixa a folha vazia; mais, estoura a página.
+- TUDO PRECISA CABER EM UMA PÁGINA A4. Respeite os limites por seção:
+  no máximo 4 dados em "info", 3 pares em "relacionar", 4 perguntas,
+  3 campos em "producao" e 5 itens no checklist.
+  Em "producao", cada campo tem no máximo 2 linhas de frase: uma frase começada
+  longa demais empurra a chamada final para fora da folha.
 - Cores disponíveis: azul, verde, roxo, amarelo, laranja, creme, cinza. Use cores
   DIFERENTES em seções vizinhas, e repita a mesma cor quando duas partes da
   folha se referem à mesma coisa.
@@ -182,8 +187,17 @@ REGRAS VISUAIS
   2. A seção "info": a CENA do tema, o assunto da atividade.
   3. UMA outra seção: um objeto decorativo ligado ao tema.
   4. "chamada_final": um objeto que feche a ideia (jornal, troféu, estrela).
-  Cada "imagem_prompt" é um objeto concreto, em português e em até 6 palavras.
-  Nunca peça desenho de letra, sílaba ou texto.
+  DESCREVA BEM CADA UMA, em 15 a 25 palavras, em português. Uma descrição curta
+  devolve um ícone genérico; uma descrição rica devolve a cena certa.
+  Diga: o objeto principal, os detalhes que importam, o cenário e as cores.
+  Fraco:  "uma livraria".
+  Bom:    "fachada de uma livraria comunitária com porta de vidro aberta, letreiro
+           azul na frente, prateleiras cheias de livros coloridos lá dentro e uma
+           pilha de livros na calçada, plantas verdes ao lado".
+  Fraco:  "um jornal".
+  Bom:    "um jornal dobrado com a palavra NOTÍCIA bem grande na capa, uma foto e
+           linhas de texto, com algumas estrelinhas de destaque em volta".
+  Nunca peça desenho de letra isolada ou de sílaba.
 - Enunciados curtos. O "subtitulo" de cada seção tem no máximo 10 palavras.
 
 ==================================================
@@ -221,8 +235,8 @@ ${ESQUEMA}`;
 // modelo de imagem acaba desenhando livros e estantes em vez do objeto pedido.
 const ESTILO_ILUSTRACAO =
   "colorful flat vector illustration, modern clean style, vibrant friendly colors, " +
-  "bold simple shapes, plain white background, no text, no letters, no numbers, " +
-  "centered single subject, educational material for children";
+  "bold simple shapes, plain white background, centered composition, " +
+  "educational material for children, cheerful and friendly";
 
 /**
  * Extrai as marcações [IMAGEM: ...] do texto da atividade, na ordem em que

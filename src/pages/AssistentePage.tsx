@@ -880,6 +880,22 @@ const AssistentePage = () => {
       await Promise.all(imgs.map((im) =>
         im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = r; })
       ));
+
+      // Garantia de página única: o modelo às vezes escreve demais e a folha
+      // passa dos 1123px do A4, cortando a chamada final na impressão. Em vez
+      // de perder conteúdo, a folha inteira encolhe o suficiente para caber.
+      const A4 = 1123;
+      const alvo = host.firstElementChild as HTMLElement;
+      if (alvo.scrollHeight > A4) {
+        const fator = Math.max(0.72, A4 / alvo.scrollHeight);
+        alvo.style.transform = `scale(${fator})`;
+        alvo.style.transformOrigin = "top left";
+        alvo.style.width = `${794 / fator}px`;
+        host.style.width = "794px";
+        host.style.height = `${A4}px`;
+        host.style.overflow = "hidden";
+        await new Promise((r) => setTimeout(r, 60));
+      }
       return await html2canvas(host.firstElementChild as HTMLElement, {
         scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false,
       });
