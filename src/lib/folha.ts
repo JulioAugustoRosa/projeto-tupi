@@ -20,12 +20,13 @@ import {
  * fotocópia em preto e branco, que é como a maioria das escolas imprime.
  */
 export const PALETA = {
-  azul:    { fundo: "#E8F1FD", borda: "#2563EB", texto: "#14306B" },
-  verde:   { fundo: "#E7F6EC", borda: "#15803D", texto: "#14432A" },
-  roxo:    { fundo: "#F1EAFB", borda: "#7C3AED", texto: "#3B1D70" },
-  amarelo: { fundo: "#FEF6DC", borda: "#D97706", texto: "#6B3F05" },
-  laranja: { fundo: "#FDEDE6", borda: "#E95A3A", texto: "#7A2912" },
-  cinza:   { fundo: "#F3F4F6", borda: "#6B7280", texto: "#1F2937" },
+  azul:    { fundo: "#CFE4FB", borda: "#1D4ED8", texto: "#0F2A63" },
+  verde:   { fundo: "#D4F0DA", borda: "#15803D", texto: "#0E3A22" },
+  roxo:    { fundo: "#E6D8F7", borda: "#7C3AED", texto: "#331663" },
+  amarelo: { fundo: "#FCE08A", borda: "#D97706", texto: "#5C3604" },
+  laranja: { fundo: "#FBD9C8", borda: "#E2561F", texto: "#6B2410" },
+  creme:   { fundo: "#FDEFD4", borda: "#E0A33C", texto: "#5C3C08" },
+  cinza:   { fundo: "#E7EAEE", borda: "#64748B", texto: "#1F2937" },
 } as const;
 
 export type NomeCor = keyof typeof PALETA;
@@ -75,6 +76,9 @@ export interface SecaoFolha {
 
 export interface MaterialOriginal { imagem?: string; legenda?: string }
 
+/** Ilustração decorativa: entra no topo, ao lado de uma seção ou na chamada. */
+export interface Ilustracao { imagem?: string; imagem_prompt?: string }
+
 export interface Folha {
   titulo?: string;
   /** faixa escura do topo, ex: "LÍNGUA PORTUGUESA — PRODUÇÃO TEXTUAL" */
@@ -87,8 +91,10 @@ export interface Folha {
   adaptacoes_aplicadas?: string[];
   config?: { fonte?: string; tamanho_pt?: number };
   material_original?: MaterialOriginal;
+  /** figura ao lado do balão de convite, ex: um megafone */
+  ilustracao_topo?: Ilustracao;
   secoes?: SecaoFolha[];
-  chamada_final?: { titulo?: string; texto?: string };
+  chamada_final?: { titulo?: string; texto?: string; imagem?: string; imagem_prompt?: string };
 }
 
 const esc = (s: unknown) =>
@@ -117,14 +123,15 @@ function conteudoSecao(s: SecaoFolha, pt: number): string {
   switch (s.tipo) {
     case "info": {
       const img = s.imagem
-        ? `<img src="${s.imagem}" alt="" style="width:${pt * 13}px;height:${pt * 13}px;object-fit:cover;border-radius:8px;border:2px solid ${c.borda};flex:none;" />`
+        ? `<img src="${s.imagem}" alt="" style="width:${pt * 15}px;height:${pt * 15}px;object-fit:cover;border-radius:12px;border:3px solid ${c.borda};flex:none;" />`
         : "";
       const linhas = (s.dados ?? []).map((d) =>
         `<div style="display:flex;gap:6px;align-items:baseline;margin-bottom:3px;">
            <span style="flex:none;">${esc(d.icone || "•")}</span>
            <span><b>${esc(d.rotulo)}:</b> ${esc(d.valor)}</span>
          </div>`).join("");
-      return `<div style="display:flex;gap:${pt}px;align-items:flex-start;">
+      return `<div style="display:flex;gap:${pt}px;align-items:flex-start;background:${PALETA.creme.fundo};
+          border-radius:12px;padding:${pt * 0.6}px;">
         ${img}
         <div style="flex:1;font-size:${peq}pt;line-height:1.4;">
           ${s.destaque ? `<p style="margin:0 0 6px;">${esc(s.destaque)}</p>` : ""}
@@ -138,12 +145,13 @@ function conteudoSecao(s: SecaoFolha, pt: number): string {
         ${(s.pares ?? []).map((p) => {
           const pc = cor(p.cor ?? s.cor);
           return `<div style="display:flex;align-items:center;gap:8px;">
-            <div style="flex:0 0 38%;background:${pc.fundo};border:2px solid ${pc.borda};color:${pc.texto};
-                 border-radius:7px;padding:5px 7px;font-weight:800;font-size:${peq}pt;text-align:center;">${esc(p.rotulo)}</div>
+            <div style="flex:0 0 38%;background:${pc.fundo};border:2.5px solid ${pc.borda};color:${pc.texto};
+                 border-radius:10px;padding:7px 8px;font-weight:800;font-size:${peq}pt;text-align:center;">${esc(p.rotulo)}</div>
             <span style="width:7px;height:7px;border:2px solid #333;border-radius:999px;flex:none;"></span>
             <span style="flex:1;border-bottom:1px dotted #bbb;"></span>
             <span style="width:7px;height:7px;border:2px solid #333;border-radius:999px;flex:none;"></span>
-            <div style="flex:0 0 42%;border:1.5px solid #cbd5e1;border-radius:7px;padding:5px 7px;font-size:${peq}pt;">${esc(p.definicao)}</div>
+            <div style="flex:0 0 42%;border:2px solid ${PALETA.azul.borda};border-radius:10px;padding:6px 8px;
+                 font-size:${peq}pt;background:#fff;">${esc(p.definicao)}</div>
           </div>`;
         }).join("")}
       </div>`;
@@ -156,7 +164,7 @@ function conteudoSecao(s: SecaoFolha, pt: number): string {
                  border-radius:999px;padding:5px 10px;font-size:${peq}pt;font-weight:700;display:flex;gap:5px;align-items:center;">
               <span>${esc(q.icone || "?")}</span><span>${esc(q.pergunta)}</span>
             </div>
-            <div style="flex:1;border:1.5px solid #94a3b8;border-radius:7px;min-height:${pt * 2.2}px;"></div>
+            <div style="flex:1;border-bottom:2px solid ${c.borda};margin-bottom:4px;"></div>
           </div>`).join("")}
       </div>`;
 
@@ -164,7 +172,7 @@ function conteudoSecao(s: SecaoFolha, pt: number): string {
       return `<div style="display:flex;flex-direction:column;gap:${pt * 0.6}px;">
         ${(s.campos ?? []).map((campo) => {
           const cc = cor(campo.cor ?? s.cor);
-          return `<div style="background:${cc.fundo};border:2px solid ${cc.borda};border-radius:8px;padding:${pt * 0.6}px ${pt * 0.7}px;">
+          return `<div style="background:${cc.fundo};border:2.5px solid ${cc.borda};border-radius:12px;padding:${pt * 0.65}px ${pt * 0.75}px;">
             <div style="font-weight:800;color:${cc.texto};font-size:${peq}pt;margin-bottom:3px;">${esc(campo.rotulo)}</div>
             <div style="font-size:${peq}pt;line-height:2.1;">${comLacunas(campo.texto, pt)}</div>
           </div>`;
@@ -187,8 +195,15 @@ function conteudoSecao(s: SecaoFolha, pt: number): string {
 function secaoHtml(s: SecaoFolha, pt: number): string {
   const c = cor(s.cor);
   const inteira = s.largura === "inteira";
-  return `<section style="grid-column:${inteira ? "1 / -1" : "auto"};border:2px solid ${c.borda};border-radius:10px;
-      padding:${pt * 0.7}px ${pt * 0.8}px;background:#fff;break-inside:avoid;">
+  // Decorativa fica DEPOIS do conteúdo, nunca sobreposta: em absolute ela cobria
+  // o texto da própria seção. mix-blend-multiply some com o fundo branco do PNG.
+  const figura = (s.imagem && s.tipo !== "info")
+    ? `<div style="text-align:right;margin-top:${pt * 0.3}px;">
+         <img src="${s.imagem}" alt="" style="width:${pt * 6.5}px;height:${pt * 6.5}px;object-fit:contain;mix-blend-mode:multiply;" />
+       </div>`
+    : "";
+  return `<section style="grid-column:${inteira ? "1 / -1" : "auto"};border:3px solid ${c.borda};
+      border-radius:16px;padding:${pt * 0.75}px ${pt * 0.85}px;background:#fff;break-inside:avoid;">
     <div style="display:flex;gap:9px;align-items:center;margin-bottom:${s.subtitulo ? 3 : 9}px;
          border-bottom:2px solid ${c.fundo};padding-bottom:5px;">
       ${s.numero != null ? `<span style="flex:none;width:${pt * 2.3}px;height:${pt * 2.3}px;border-radius:999px;background:${c.borda};
@@ -197,7 +212,7 @@ function secaoHtml(s: SecaoFolha, pt: number): string {
            text-transform:uppercase;letter-spacing:.4px;line-height:1.15;">${esc(s.titulo)}</h3>
     </div>
     ${s.subtitulo ? `<p style="margin:0 0 ${pt * 0.5}px ${pt * 2.3}px;font-size:${(pt * 0.75).toFixed(1)}pt;color:#555;">${esc(s.subtitulo)}</p>` : ""}
-    ${conteudoSecao(s, pt)}
+    ${conteudoSecao(s, pt)}${figura}
   </section>`;
 }
 
@@ -221,10 +236,11 @@ export function paginaHtml(folha: Folha | null | undefined, _idx = 0): string {
 
   const faixa2 = (folha.etiqueta || folha.convite)
     ? `<div style="display:flex;gap:${pt * 0.8}px;align-items:stretch;margin-top:${pt * 0.7}px;">
-        ${folha.etiqueta ? `<div style="background:${PALETA.amarelo.fundo};border:2px solid ${PALETA.amarelo.borda};color:${PALETA.amarelo.texto};
-             border-radius:999px;padding:5px ${pt}px;font-weight:800;font-size:${(pt * 0.9).toFixed(1)}pt;display:flex;align-items:center;">${esc(folha.etiqueta)}</div>` : ""}
-        ${folha.convite ? `<div style="flex:1;background:${PALETA.azul.fundo};border:2px solid ${PALETA.azul.borda};color:${PALETA.azul.texto};
-             border-radius:10px;padding:5px ${pt * 0.8}px;font-size:${(pt * 0.82).toFixed(1)}pt;display:flex;align-items:center;">📣 ${esc(folha.convite)}</div>` : ""}
+        ${folha.etiqueta ? `<div style="background:${PALETA.amarelo.fundo};border:2.5px solid ${PALETA.amarelo.borda};color:${PALETA.amarelo.texto};
+             border-radius:999px;padding:7px ${pt * 1.2}px;font-weight:800;font-size:${(pt * 1.15).toFixed(1)}pt;display:flex;align-items:center;white-space:nowrap;">${esc(folha.etiqueta)}</div>` : ""}
+        ${folha.convite ? `<div style="flex:1;background:${PALETA.azul.fundo};border:2.5px solid ${PALETA.azul.borda};color:${PALETA.azul.texto};
+             border-radius:14px;padding:7px ${pt * 0.9}px;font-size:${(pt * 0.86).toFixed(1)}pt;font-weight:600;display:flex;align-items:center;text-align:center;justify-content:center;">${esc(folha.convite)}</div>` : ""}
+        ${folha.ilustracao_topo?.imagem ? `<img src="${folha.ilustracao_topo.imagem}" alt="" style="width:${pt * 6.5}px;height:${pt * 6.5}px;object-fit:contain;flex:none;mix-blend-mode:multiply;" />` : ""}
       </div>`
     : "";
 
@@ -236,10 +252,13 @@ export function paginaHtml(folha: Folha | null | undefined, _idx = 0): string {
     : "";
 
   const rodape = (folha.chamada_final?.titulo || folha.chamada_final?.texto)
-    ? `<div style="grid-column:1 / -1;background:${PALETA.amarelo.fundo};border:2px solid ${PALETA.amarelo.borda};
-         border-radius:10px;padding:${pt * 0.7}px ${pt}px;text-align:center;">
-        <div style="font-weight:800;color:${PALETA.amarelo.texto};font-size:${(pt * 1.05).toFixed(1)}pt;">${esc(folha.chamada_final?.titulo ?? "")}</div>
-        ${folha.chamada_final?.texto ? `<div style="font-size:${(pt * 0.78).toFixed(1)}pt;color:#6B3F05;margin-top:2px;">${esc(folha.chamada_final.texto)}</div>` : ""}
+    ? `<div style="grid-column:1 / -1;background:${PALETA.amarelo.fundo};border:3px solid ${PALETA.amarelo.borda};
+         border-radius:18px;padding:${pt * 0.8}px ${pt}px;display:flex;align-items:center;gap:${pt}px;">
+        <div style="flex:1;text-align:center;">
+          <div style="font-weight:800;color:${PALETA.amarelo.texto};font-size:${(pt * 1.35).toFixed(1)}pt;">${esc(folha.chamada_final?.titulo ?? "")}</div>
+          ${folha.chamada_final?.texto ? `<div style="font-size:${(pt * 0.82).toFixed(1)}pt;color:#5C3604;margin-top:3px;">${esc(folha.chamada_final.texto)}</div>` : ""}
+        </div>
+        ${folha.chamada_final?.imagem ? `<img src="${folha.chamada_final.imagem}" alt="" style="width:${pt * 7}px;height:${pt * 7}px;object-fit:contain;flex:none;mix-blend-mode:multiply;" />` : ""}
       </div>`
     : "";
 

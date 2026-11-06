@@ -20,7 +20,7 @@ const TIMEOUT_MS = 60_000;
 // Um bloco "ligar" sozinho consome 3 ilustrações, então o teto antigo de 10 se
 // esgotava antes do fim da folha e exercícios como "pinte o desenho" saíam sem
 // desenho nenhum. São baixadas em paralelo, então subir o teto não soma latência.
-const MAX_IMAGENS = 1;  // a folha tem uma ilustração: a cena do tema
+const MAX_IMAGENS = 4;  // tema, topo, uma seção e a chamada final
 const MAX_ANEXOS = 2;
 const MAX_ANEXO_BYTES = 4_000_000;
 
@@ -57,6 +57,7 @@ const ESQUEMA = `{
   "faixa": "LÍNGUA PORTUGUESA — PRODUÇÃO TEXTUAL",
   "etiqueta": "GÊNERO TEXTUAL: NOTÍCIA",
   "convite": "Vamos produzir uma notícia sobre a inauguração da livraria?",
+  "ilustracao_topo": { "imagem_prompt": "um megafone" },
   "adaptacoes_aplicadas": ["uma frase por decisão, ligada ao perfil"],
   "config": { "fonte": "Verdana", "tamanho_pt": 11 },
   "secoes": [
@@ -103,10 +104,11 @@ const ESQUEMA = `{
     {
       "numero": 5, "titulo": "REVISÃO", "subtitulo": "Minha notícia tem:",
       "cor": "cinza", "largura": "metade", "tipo": "checklist",
-      "itens": ["Título.","Informação sobre o acontecimento.","Data e horário.","Local.","Participantes."]
+      "itens": ["Título.","Informação sobre o acontecimento.","Data e horário.","Local.","Participantes."],
+      "imagem_prompt": "uma pilha de livros coloridos"
     }
   ],
-  "chamada_final": { "titulo": "Agora é com você!", "texto": "Sua notícia pode informar toda a comunidade." }
+  "chamada_final": { "titulo": "Agora é com você!", "texto": "Sua notícia pode informar toda a comunidade.", "imagem_prompt": "um jornal dobrado" }
 }`;
 
 function montarPrompt(ctx: string, conteudo: string, temMaterial: boolean) {
@@ -171,12 +173,17 @@ REGRAS VISUAIS
 - TUDO EM UMA PÁGINA. Use "largura":"metade" em quase todas as seções, para
   caírem lado a lado. Reserve "inteira" para no máximo uma.
 - Entre 4 e 6 seções. Menos que isso deixa a folha vazia; mais, apertada.
-- Cores disponíveis: azul, verde, roxo, amarelo, laranja, cinza. Use cores
+- Cores disponíveis: azul, verde, roxo, amarelo, laranja, creme, cinza. Use cores
   DIFERENTES em seções vizinhas, e repita a mesma cor quando duas partes da
   folha se referem à mesma coisa.
 - Ícones são EMOJI no texto, não imagens: 📅 🕐 📍 👥 ❓ ✏️ 📝 💡 ⭐ 📣 🔎 💰
-- "imagem_prompt" aparece NO MÁXIMO em uma seção, a do tipo "info". É a cena do
-  tema, descrita em português e em até 8 palavras.
+- A folha leva QUATRO ilustrações coloridas, e todas importam para o visual:
+  1. "ilustracao_topo": um objeto que simbolize a tarefa (megafone, lápis, lupa).
+  2. A seção "info": a CENA do tema, o assunto da atividade.
+  3. UMA outra seção: um objeto decorativo ligado ao tema.
+  4. "chamada_final": um objeto que feche a ideia (jornal, troféu, estrela).
+  Cada "imagem_prompt" é um objeto concreto, em português e em até 6 palavras.
+  Nunca peça desenho de letra, sílaba ou texto.
 - Enunciados curtos. O "subtitulo" de cada seção tem no máximo 10 palavras.
 
 ==================================================
@@ -213,9 +220,9 @@ ${ESQUEMA}`;
 // Sem as palavras "coloring book" e "worksheet": elas contaminam o resultado e o
 // modelo de imagem acaba desenhando livros e estantes em vez do objeto pedido.
 const ESTILO_ILUSTRACAO =
-  "black and white line art, thick clean outlines, no shading, no color fill, " +
-  "plain white background, no text, no letters, no numbers, single object, centered, " +
-  "simple flat illustration for a young child";
+  "colorful flat vector illustration, modern clean style, vibrant friendly colors, " +
+  "bold simple shapes, plain white background, no text, no letters, no numbers, " +
+  "centered single subject, educational material for children";
 
 /**
  * Extrai as marcações [IMAGEM: ...] do texto da atividade, na ordem em que
@@ -454,16 +461,18 @@ serve(async (req) => {
       // 1) Numeração sequencial. O modelo repete ou reinicia a contagem.
       secoes.forEach((sec, i) => { sec.numero = i + 1; });
 
-      // 2) Ilustração: no máximo UMA, na seção "info". A descrição vinda da
-      //    adaptação vale mais que a inventada aqui, que já encheu folha de
-      //    dinossauro com desenho de livro.
-      let usada = false;
+      // 2) Ilustrações: a da seção "info" recebe a descrição vinda da adaptação,
+      //    que conhece o tema; as demais ficam com o que o modelo pediu. Seções
+      //    extras além de uma perdem a figura, para a folha não virar álbum.
+      let comInfo = false;
+      let decorativas = 0;
       for (const sec of secoes) {
-        if (sec.tipo === "info" && !usada) {
+        if (sec.tipo === "info" && !comInfo) {
           if (descImagens.length > 0) sec.imagem_prompt = descImagens[0];
-          usada = !!sec.imagem_prompt;
-        } else {
-          delete sec.imagem_prompt;
+          comInfo = true;
+        } else if (sec.imagem_prompt) {
+          decorativas += 1;
+          if (decorativas > 1) delete sec.imagem_prompt;
         }
       }
 
@@ -490,7 +499,12 @@ serve(async (req) => {
 
     // Ilustrações embutidas em base64
     if (com_imagens !== false) {
-      const alvos = ((folha.secoes ?? []) as SecaoBruta[]).filter((sec) => sec.imagem_prompt);
+      type ComImagem = { imagem_prompt?: string; imagem?: string };
+      const alvos: ComImagem[] = [
+        folha.ilustracao_topo as ComImagem,
+        ...((folha.secoes ?? []) as SecaoBruta[]),
+        folha.chamada_final as ComImagem,
+      ].filter((x): x is ComImagem => !!x?.imagem_prompt).slice(0, MAX_IMAGENS);
       const imagens = await Promise.all(
         alvos.map((sec) => baixarIlustracao(`${sec.imagem_prompt!}, ${ESTILO_ILUSTRACAO}`, apiKey)),
       );
