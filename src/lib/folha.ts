@@ -200,7 +200,10 @@ function secaoHtml(s: SecaoFolha, pt: number): string {
 }
 
 /** A folha inteira numa página A4 (794×1123 px a 96dpi). */
-export function paginaHtml(folha: Folha, _idx = 0): string {
+export function paginaHtml(folha: Folha | null | undefined, _idx = 0): string {
+  // Defesa: esta função é chamada de dentro do JSX, e um valor inesperado aqui
+  // derruba a página inteira em tela branca. Vale devolver vazio e seguir.
+  if (!folha || typeof folha !== "object") return "";
   const cfg = folha.config ?? {};
   const pt = cfg.tamanho_pt ?? 11;
   const secoes = folha.secoes ?? [];

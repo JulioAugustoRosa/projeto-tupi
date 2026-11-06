@@ -1539,14 +1539,18 @@ const AssistentePage = () => {
             ))}
           </div>
 
-          {/* Pré-visualização da folha, reduzida para caber na janela */}
-          <div className="bg-muted/30 rounded-xl p-4">
-            <div className="overflow-hidden rounded-lg border border-border bg-white shadow-sm mx-auto"
-                 style={{ width: 636, height: 899 }}>
-              <div style={{ transform: "scale(0.8)", transformOrigin: "top left" }}
-                   dangerouslySetInnerHTML={{ __html: paginaHtml(folha!) }} />
+          {/* Pré-visualização da folha, reduzida para caber na janela.
+              O corpo do Dialog é montado mesmo com ele fechado, então a
+              renderização só pode acontecer quando há folha de verdade. */}
+          {folha && (
+            <div className="bg-muted/30 rounded-xl p-4">
+              <div className="overflow-hidden rounded-lg border border-border bg-white shadow-sm mx-auto"
+                   style={{ width: 636, height: 899 }}>
+                <div style={{ transform: "scale(0.8)", transformOrigin: "top left" }}
+                     dangerouslySetInnerHTML={{ __html: paginaHtml(folha) }} />
+              </div>
             </div>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
     </>
