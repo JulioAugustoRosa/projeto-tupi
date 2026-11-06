@@ -215,8 +215,9 @@ O perfil acima decide o GRAU DE APOIO, não o visual:
 - Mais apoio: mais frases começadas, menos lacunas por frase, respostas por
   marcar ou ligar em vez de escrever, checklist mais detalhado.
 - Menos apoio: lacunas maiores, perguntas abertas, menos modelo pronto.
-- Hiperfocos e interesses entram nos exemplos e na imagem, nunca mudando o
-  conteúdo que o professor pediu.
+- Hiperfocos e interesses entram SOMENTE na ilustração, na frase de incentivo e no
+  exemplo resolvido. Nunca no conteúdo: não troque as palavras, o tema ou os
+  personagens que vieram no texto para aproximá-los do interesse do estudante.
 - Se o estudante ainda não escreve, troque a seção de produção por uma de
   "relacionar" ou "perguntas" com resposta por desenho.
 
@@ -226,8 +227,20 @@ O QUE O PROFESSOR PEDIU
 
 ${conteudo}
 
-Preserve o conteúdo e o objetivo. O que você decide é a APRESENTAÇÃO: quais
-seções, em que ordem, com que cor e com quanto apoio.
+FIDELIDADE — REGRA ACIMA DAS DEMAIS:
+O texto acima já passou pela adaptação pedagógica. Aqui você NÃO reescreve nada.
+
+Copie LITERALMENTE para a folha: as palavras das listas, os textos, os números, as
+datas, os nomes, os personagens e o que cada pergunta pergunta. Se o texto traz
+BOLA, GATO, CASA e PATO, a folha traz essas quatro palavras, nessa ordem, sem
+acrescentar nem tirar nenhuma — ainda que o estudante goste de outro assunto.
+
+Você decide APENAS a apresentação: quais seções usar, em que ordem, com que cor,
+onde entram as lacunas e quanto apoio dar. Encurtar uma INSTRUÇÃO é permitido;
+mudar o CONTEÚDO não é.
+
+Se algum item não couber em nenhuma seção, prefira usar a seção "texto" a
+descartá-lo. Perder um item do professor é pior que uma folha menos bonita.
 
 Responda APENAS com um JSON válido neste formato, sem markdown e sem cercas:
 ${ESQUEMA}`;
