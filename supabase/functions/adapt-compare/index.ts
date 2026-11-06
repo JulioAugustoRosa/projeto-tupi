@@ -12,8 +12,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 // `reasoning` é essencial aqui: gpt-5-nano tem raciocínio OBRIGATÓRIO e o
 // claude-haiku-5.5 usa esforço "medium" por padrão. Sem baixar o esforço, os
 // dois consomem todo o max_tokens pensando e devolvem conteúdo vazio.
-// Três degraus da mesma família GPT-5, do mais barato ao mais capaz, para
-// comparar qualidade contra custo na mesma tarefa.
+// Dois degraus da mesma família GPT-5, para comparar qualidade contra custo
+// na mesma tarefa sem o salto de preço e de tempo do modelo completo.
 // Os três têm raciocínio OBRIGATÓRIO; nos menores ele é mantido no mínimo para
 // não consumir o orçamento de tokens antes de escrever a resposta.
 const MODELOS_PERMITIDOS: Record<string, { nome: string; reasoning?: Record<string, unknown> }> = {
@@ -25,14 +25,9 @@ const MODELOS_PERMITIDOS: Record<string, { nome: string; reasoning?: Record<stri
     nome: "GPT-5 Mini",
     reasoning: { effort: "low" },
   },
-  "openai/gpt-5": {
-    nome: "GPT-5",
-    // "medium" estourava os 90s de timeout; "low" mantém a qualidade e cabe no tempo
-    reasoning: { effort: "low" },
-  },
 };
 
-const MAX_MODELOS = 3;
+const MAX_MODELOS = 2;
 const MAX_TEXTO = 8000;          // caracteres do enunciado digitado
 const MAX_ARQUIVO_BYTES = 4_000_000; // ~4 MB por arquivo, já em base64 decodificado
 const MAX_ARQUIVOS = 2;

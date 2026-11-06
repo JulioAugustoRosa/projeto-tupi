@@ -66,8 +66,7 @@ const FOLHA_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gerar-folha
 /** Espelha a lista fixa validada no servidor (supabase/functions/adapt-compare). */
 const MODELOS = [
   { id: "openai/gpt-5-nano", nome: "GPT-5 Nano", detalhe: "mais rápido" },
-  { id: "openai/gpt-5-mini", nome: "GPT-5 Mini", detalhe: "intermediário" },
-  { id: "openai/gpt-5", nome: "GPT-5", detalhe: "mais capaz" },
+  { id: "openai/gpt-5-mini", nome: "GPT-5 Mini", detalhe: "mais capaz" },
 ] as const;
 
 const MAX_ARQUIVO_MB = 4;
@@ -1410,7 +1409,7 @@ const AssistentePage = () => {
                   <Button variant="outline" size="sm" className="h-9 gap-2 text-sm">
                     <Cpu className="h-4 w-4 text-muted-foreground" />
                     {modelosSel.length === MODELOS.length
-                      ? "Os 3 modelos"
+                      ? "Os 2 modelos"
                       : modelosSel.length === 1
                       ? MODELOS.find((m) => m.id === modelosSel[0])?.nome
                       : `${modelosSel.length} modelos`}
@@ -1440,7 +1439,7 @@ const AssistentePage = () => {
                   })}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setModelosSel(MODELOS.map((m) => m.id))}>
-                    Selecionar os 3
+                    Selecionar os 2
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

@@ -189,10 +189,12 @@ function secaoHtml(s: SecaoFolha, pt: number): string {
   const inteira = s.largura === "inteira";
   return `<section style="grid-column:${inteira ? "1 / -1" : "auto"};border:2px solid ${c.borda};border-radius:10px;
       padding:${pt * 0.7}px ${pt * 0.8}px;background:#fff;break-inside:avoid;">
-    <div style="display:flex;gap:7px;align-items:center;margin-bottom:${s.subtitulo ? 2 : 6}px;">
-      ${s.numero != null ? `<span style="flex:none;width:${pt * 1.7}px;height:${pt * 1.7}px;border-radius:999px;background:${c.borda};
-           color:#fff;font-weight:800;font-size:${(pt * 0.85).toFixed(1)}pt;display:flex;align-items:center;justify-content:center;">${s.numero}</span>` : ""}
-      <h3 style="margin:0;font-size:${(pt * 0.92).toFixed(1)}pt;font-weight:800;color:${c.texto};text-transform:uppercase;letter-spacing:.3px;">${esc(s.titulo)}</h3>
+    <div style="display:flex;gap:9px;align-items:center;margin-bottom:${s.subtitulo ? 3 : 9}px;
+         border-bottom:2px solid ${c.fundo};padding-bottom:5px;">
+      ${s.numero != null ? `<span style="flex:none;width:${pt * 2.3}px;height:${pt * 2.3}px;border-radius:999px;background:${c.borda};
+           color:#fff;font-weight:800;font-size:${(pt * 1.15).toFixed(1)}pt;display:flex;align-items:center;justify-content:center;">${s.numero}</span>` : ""}
+      <h3 style="margin:0;font-size:${(pt * 1.3).toFixed(1)}pt;font-weight:800;color:${c.texto};
+           text-transform:uppercase;letter-spacing:.4px;line-height:1.15;">${esc(s.titulo)}</h3>
     </div>
     ${s.subtitulo ? `<p style="margin:0 0 ${pt * 0.5}px ${pt * 2.3}px;font-size:${(pt * 0.75).toFixed(1)}pt;color:#555;">${esc(s.subtitulo)}</p>` : ""}
     ${conteudoSecao(s, pt)}
@@ -340,7 +342,7 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
     filhos.push(new Paragraph({
       children: [new TextRun({
         text: `${s.numero != null ? `${s.numero}. ` : ""}${s.titulo.toUpperCase()}`,
-        bold: true, size: Math.round(half * 0.95), color: semHex(c.texto), font: fonte,
+        bold: true, size: Math.round(half * 1.3), color: semHex(c.texto), font: fonte,
       })],
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 220, after: 60 },
