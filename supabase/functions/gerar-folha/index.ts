@@ -9,9 +9,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 // A diagramação era o elo fraco: num modelo "lite" ela explodia 5 exercícios em
 // 10 páginas, reescrevia enunciados prontos, descartava as ilustrações e mandava
 // um par só nos exercícios de ligar. Exige obediência estrutural, não criatividade.
-const MODELO = "openai/gpt-5-mini";
-// Raciocínio é obrigatório nesta família e os tokens dele saem do mesmo teto:
-// sem baixar o esforço, o modelo gasta o orçamento pensando e devolve JSON vazio.
+const MODELO = "openai/gpt-6-luna";
+// Raciocínio é opcional nesta família, mas o padrão é "medium". Sem fixar em
+// "low", os tokens de raciocínio saem do mesmo teto e sobra pouco para o JSON.
 const RACIOCINIO = { effort: "low" };
 const MAX_TOKENS = 12000;
 const MAX_CONTEUDO = 12000;
@@ -162,9 +162,16 @@ prepara a seguinte:
 5) REVISAR (tipo "checklist") — "Minha notícia tem:" com itens para o aluno
    conferir sozinho. Devolve o controle a ele.
 
-Nem toda atividade precisa das cinco. Escolha as que servem ao que foi pedido,
-mas SEMPRE termine com uma de produção ou de registro, e SEMPRE feche com a
-"chamada_final" de incentivo.
+Nem toda atividade precisa das cinco, MAS A DE PRODUÇÃO É OBRIGATÓRIA: toda
+folha tem exatamente uma seção "tipo":"producao", com frases já começadas e ___
+onde o aluno continua. É nela que o estudante de fato realiza a tarefa; sem ela
+a folha vira só leitura e marcação.
+Não substitua a produção por múltipla escolha dentro de "perguntas": a pílula de
+pergunta é curta e as opções ficam espremidas e ilegíveis.
+SEMPRE feche com a "chamada_final" de incentivo.
+
+NÃO numere o título da seção. O campo "numero" já desenha a bolinha; escrever
+"1. VEJA AS INFORMAÇÕES" faz o número aparecer duas vezes.
 
 ==================================================
 REGRAS VISUAIS

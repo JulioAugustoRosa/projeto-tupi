@@ -12,8 +12,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 // `reasoning` é essencial aqui: gpt-5-nano tem raciocínio OBRIGATÓRIO e o
 // claude-haiku-5.5 usa esforço "medium" por padrão. Sem baixar o esforço, os
 // dois consomem todo o max_tokens pensando e devolvem conteúdo vazio.
-// Dois degraus da mesma família GPT-5, para comparar qualidade contra custo
-// na mesma tarefa sem o salto de preço e de tempo do modelo completo.
+// Dois degraus para comparar qualidade contra custo na mesma tarefa.
+// O Luna é de geração mais nova que o Nano, 2,6x mais contexto e raciocínio
+// opcional, por um custo próximo.
 // Os três têm raciocínio OBRIGATÓRIO; nos menores ele é mantido no mínimo para
 // não consumir o orçamento de tokens antes de escrever a resposta.
 const MODELOS_PERMITIDOS: Record<string, { nome: string; reasoning?: Record<string, unknown> }> = {
@@ -21,8 +22,11 @@ const MODELOS_PERMITIDOS: Record<string, { nome: string; reasoning?: Record<stri
     nome: "GPT-5 Nano",
     reasoning: { effort: "minimal" },
   },
-  "openai/gpt-5-mini": {
-    nome: "GPT-5 Mini",
+  "openai/gpt-6-luna": {
+    nome: "GPT-6 Luna",
+    // Raciocínio é opcional nesta família, mas o padrão é "medium": sem fixar
+    // em "low", o modelo gastaria o orçamento de tokens pensando, como fazia o
+    // gpt-5-mini, cujo raciocínio era obrigatório.
     reasoning: { effort: "low" },
   },
 };

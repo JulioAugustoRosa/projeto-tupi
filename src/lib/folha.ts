@@ -197,6 +197,9 @@ function conteudoSecao(s: SecaoFolha, pt: number): string {
   }
 }
 
+/** O modelo costuma escrever "1. VEJA AS INFORMAÇÕES"; a bolinha já numera. */
+const tituloLimpo = (t: string) => (t || "").replace(/^\s*\d+\s*[).\-–—]\s*/, "").trim();
+
 function secaoHtml(s: SecaoFolha, pt: number): string {
   const c = cor(s.cor);
   const inteira = s.largura === "inteira";
@@ -214,7 +217,7 @@ function secaoHtml(s: SecaoFolha, pt: number): string {
       ${s.numero != null ? `<span style="flex:none;width:${pt * 2.3}px;height:${pt * 2.3}px;border-radius:999px;background:${c.borda};
            color:#fff;font-weight:800;font-size:${(pt * 1.15).toFixed(1)}pt;display:flex;align-items:center;justify-content:center;">${s.numero}</span>` : ""}
       <h3 style="margin:0;font-size:${(pt * 1.3).toFixed(1)}pt;font-weight:800;color:${c.texto};
-           text-transform:uppercase;letter-spacing:.4px;line-height:1.15;">${esc(s.titulo)}</h3>
+           text-transform:uppercase;letter-spacing:.4px;line-height:1.15;">${esc(tituloLimpo(s.titulo))}</h3>
     </div>
     ${s.subtitulo ? `<p style="margin:0 0 ${pt * 0.5}px ${pt * 2.3}px;font-size:${(pt * 0.75).toFixed(1)}pt;color:#555;">${esc(s.subtitulo)}</p>` : ""}
     ${conteudoSecao(s, pt)}${figura}
@@ -365,7 +368,7 @@ export async function folhaParaDocx(folha: Folha): Promise<Blob> {
     const c = cor(s.cor);
     filhos.push(new Paragraph({
       children: [new TextRun({
-        text: `${s.numero != null ? `${s.numero}. ` : ""}${s.titulo.toUpperCase()}`,
+        text: `${s.numero != null ? `${s.numero}. ` : ""}${tituloLimpo(s.titulo).toUpperCase()}`,
         bold: true, size: Math.round(half * 1.3), color: semHex(c.texto), font: fonte,
       })],
       heading: HeadingLevel.HEADING_2,

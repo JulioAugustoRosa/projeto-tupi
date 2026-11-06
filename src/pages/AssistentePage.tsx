@@ -66,7 +66,7 @@ const FOLHA_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gerar-folha
 /** Espelha a lista fixa validada no servidor (supabase/functions/adapt-compare). */
 const MODELOS = [
   { id: "openai/gpt-5-nano", nome: "GPT-5 Nano", detalhe: "mais rápido" },
-  { id: "openai/gpt-5-mini", nome: "GPT-5 Mini", detalhe: "mais capaz" },
+  { id: "openai/gpt-6-luna", nome: "GPT-6 Luna", detalhe: "mais capaz" },
 ] as const;
 
 const MAX_ARQUIVO_MB = 4;
