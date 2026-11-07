@@ -1,26 +1,28 @@
-// Gera uma FOLHA DE ATIVIDADE estruturada, cujo LAYOUT é definido pelo perfil
-// do aluno: quantos exercícios cabem por página, fonte, tamanho e espaçamento.
+// Gera a FOLHA DE ATIVIDADE pronta para imprimir, com LAYOUT LIVRE.
 //
-// Devolve JSON (não HTML) para que o cliente renderize PDF, PNG e DOCX a partir
-// da mesma estrutura — no DOCX isso vira quebra de página de verdade.
+// O modelo recebe a atividade já adaptada e o perfil do estudante e desenha a
+// folha em HTML do jeito que preferir — organização, cores, tipografia, número de
+// páginas. O formato fixo de seções coloridas numa página só foi abandonado: na
+// avaliação com a professora, os blocos ficavam grudados uns nos outros, e o
+// ChatGPT de uso comum, sem regra nenhuma de diagramação, entregava folhas melhores.
+//
+// O que continua sendo do código, e não do modelo:
+//   - as ilustrações: o modelo só marca onde quer cada uma; o servidor gera e embute;
+//   - o material anexado pelo professor, embutido exatamente como foi enviado;
+//   - a limpeza do HTML (sem script, sem recurso externo);
+//   - a paginação em A4, feita no navegador, sem encolher nada.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
-// A diagramação era o elo fraco: num modelo "lite" ela explodia 5 exercícios em
-// 10 páginas, reescrevia enunciados prontos, descartava as ilustrações e mandava
-// um par só nos exercícios de ligar. Exige obediência estrutural, não criatividade.
 const MODELO = "openai/gpt-6-luna";
-// Raciocínio é opcional nesta família, mas o padrão é "medium". Sem fixar em
-// "low", os tokens de raciocínio saem do mesmo teto e sobra pouco para o JSON.
+// Raciocínio é opcional nesta família, mas o padrão é "medium". Fixado em "low"
+// para os tokens de raciocínio não consumirem o teto da resposta.
 const RACIOCINIO = { effort: "low" };
-const MAX_TOKENS = 12000;
+const MAX_TOKENS = 16000;        // HTML com CSS ocupa bem mais que o JSON antigo
 const MAX_CONTEUDO = 12000;
 const LIMITE_DIARIO = 200;       // compartilhado com adapt-compare
-const TIMEOUT_MS = 60_000;
-// Um bloco "ligar" sozinho consome 3 ilustrações, então o teto antigo de 10 se
-// esgotava antes do fim da folha e exercícios como "pinte o desenho" saíam sem
-// desenho nenhum. São baixadas em paralelo, então subir o teto não soma latência.
-const MAX_IMAGENS = 4;  // tema, topo, uma seção e a chamada final
+const TIMEOUT_MS = 120_000;
+const MAX_IMAGENS = 6;           // geradas em paralelo: o teto pesa no custo, não no tempo
 const MAX_ANEXOS = 2;
 const MAX_ANEXO_BYTES = 4_000_000;
 
@@ -41,209 +43,52 @@ function cors(origin: string | null) {
 const json = (b: unknown, s: number, o: string | null) =>
   new Response(JSON.stringify(b), { status: s, headers: { ...cors(o), "Content-Type": "application/json" } });
 
-interface SecaoBruta {
-  numero?: number;
-  tipo?: string;
-  largura?: string;
-  imagem_prompt?: string;
-  imagem?: string;
-}
 
 // ---------------------------------------------------------------------------
-// Esquema que o modelo deve devolver
+// Prompt — curto de propósito. Só há regra técnica; o visual é do modelo.
 // ---------------------------------------------------------------------------
-const ESQUEMA = `{
-  "titulo": "título curto",
-  "faixa": "LÍNGUA PORTUGUESA — PRODUÇÃO TEXTUAL",
-  "etiqueta": "GÊNERO TEXTUAL: NOTÍCIA",
-  "convite": "Vamos produzir uma notícia sobre a inauguração da livraria?",
-  "ilustracao_topo": { "imagem_prompt": "um megafone" },
-  "adaptacoes_aplicadas": ["uma frase por decisão, ligada ao perfil"],
-  "config": { "fonte": "Verdana", "tamanho_pt": 11 },
-  "secoes": [
-    {
-      "numero": 1, "titulo": "LEIA E ACOMPANHE AS INFORMAÇÕES", "cor": "azul",
-      "largura": "metade", "tipo": "info",
-      "imagem_prompt": "fachada de uma livraria comunitária",
-      "destaque": "A Comunidade Escolar vai inaugurar uma livraria comunitária.",
-      "dados": [
-        {"icone":"📅","rotulo":"Data","valor":"18 de novembro de 2026"},
-        {"icone":"🕐","rotulo":"Horário","valor":"15 horas"},
-        {"icone":"📍","rotulo":"Local","valor":"Rua dos Estudantes, 96"},
-        {"icone":"👥","rotulo":"Participantes","valor":"professores, alunos e pais"}
-      ]
-    },
-    {
-      "numero": 2, "titulo": "CONHECENDO A NOTÍCIA", "subtitulo": "Relacione cada parte à sua função.",
-      "cor": "verde", "largura": "metade", "tipo": "relacionar",
-      "pares": [
-        {"rotulo":"MANCHETE","definicao":"É o título da notícia.","cor":"azul"},
-        {"rotulo":"ABERTURA","definicao":"Apresenta as informações principais.","cor":"verde"},
-        {"rotulo":"CORPO DA NOTÍCIA","definicao":"Explica melhor o acontecimento.","cor":"roxo"}
-      ]
-    },
-    {
-      "numero": 3, "titulo": "ORGANIZE AS INFORMAÇÕES", "subtitulo": "Use o quadro acima para responder.",
-      "cor": "laranja", "largura": "metade", "tipo": "perguntas",
-      "perguntas": [
-        {"icone":"❓","pergunta":"O que vai acontecer?"},
-        {"icone":"📅","pergunta":"Quando?"},
-        {"icone":"📍","pergunta":"Onde?"},
-        {"icone":"👥","pergunta":"Quem participará?"}
-      ]
-    },
-    {
-      "numero": 4, "titulo": "PRODUÇÃO DA NOTÍCIA", "subtitulo": "Use as respostas anteriores.",
-      "cor": "roxo", "largura": "metade", "tipo": "producao",
-      "campos": [
-        {"rotulo":"MANCHETE (TÍTULO)","cor":"azul","texto":"______"},
-        {"rotulo":"ABERTURA","cor":"verde","texto":"A Comunidade Escolar vai inaugurar ______"},
-        {"rotulo":"CORPO DA NOTÍCIA","cor":"roxo","texto":"O evento acontecerá no dia ______, às ______ horas, no endereço ______."}
-      ]
-    },
-    {
-      "numero": 5, "titulo": "REVISÃO", "subtitulo": "Minha notícia tem:",
-      "cor": "cinza", "largura": "metade", "tipo": "checklist",
-      "itens": ["Título.","Informação sobre o acontecimento.","Data e horário.","Local.","Participantes."],
-      "imagem_prompt": "uma pilha de livros coloridos"
-    }
-  ],
-  "chamada_final": { "titulo": "Agora é com você!", "texto": "Sua notícia pode informar toda a comunidade.", "imagem_prompt": "um jornal dobrado" }
-}`;
-
 function montarPrompt(ctx: string, conteudo: string, temMaterial: boolean) {
   const sobreMaterial = temMaterial
     ? `
-MATERIAL ORIGINAL ANEXADO — LEIA COM ATENÇÃO:
-O professor anexou o material original (a imagem que acompanha esta mensagem) e ele
-SERÁ IMPRESSO NA PRÓPRIA FOLHA, no topo da página 1, antes das instruções.
-Por isso:
-- NÃO transcreva o material inteiro dentro dos enunciados: o aluno vai vê-lo na folha.
-- Escreva enunciados que APONTEM para ele: "Observe a tirinha acima", "No quadrinho 2...".
-- Baseie as perguntas no que realmente aparece no material. Não invente personagens,
-  falas ou cenas que não estão lá.
-- Preencha "legenda_material" com um rótulo curto do que é esse material.
-- Se a folha tiver mais de uma página e o aluno se perder ao voltar páginas, marque
-  "repetir_material": true para o material ser reimpresso em todas as páginas.
+O professor anexou o material original (a imagem que acompanha esta mensagem). Ele será
+impresso na folha: coloque <img data-material alt="material da atividade"> onde ele deve
+aparecer e escreva os enunciados apontando para ele. Não transcreva o material inteiro.
 `
-    : `
-Não há material anexado: tudo o que o aluno precisa ler deve estar escrito nos enunciados.
-Deixe "legenda_material" como string vazia e "repetir_material" como false.
-`;
+    : "";
 
-  return `Você monta FOLHAS DE ATIVIDADE ADAPTADAS no padrão usado por professoras
-especialistas em educação inclusiva: UMA página A4, colorida, em duas colunas,
-organizada em SEÇÕES NUMERADAS que se encadeiam como um andaime.
+  return `Você é um professor especialista em educação inclusiva e um ótimo designer de
+materiais didáticos. Monte a folha de atividade deste estudante, pronta para imprimir e
+entregar a ele.
+
+Você tem liberdade total: escolha o layout, a organização, as cores, a tipografia, o
+espaçamento e quantas páginas forem necessárias. Faça a melhor folha que você faria
+para este estudante, considerando o perfil abaixo.
 
 ${ctx}
-${sobreMaterial}
-==================================================
-A ESTRUTURA — O ALUNO É LEVADO PELA MÃO
-==================================================
 
-A folha não é uma lista de perguntas. É um caminho em etapas, onde cada seção
-prepara a seguinte:
-
-1) INFORMAR (tipo "info") — um card com a imagem do tema e os dados organizados
-   por ícone: 📅 data, 🕐 horário, 📍 local, 👥 participantes, 💰 valor, ✏️ autor.
-   É a FONTE que o aluno vai consultar nas seções seguintes.
-
-2) ENSINAR O GÊNERO (tipo "relacionar") — rótulos coloridos ligados às suas
-   funções. Dá ao aluno o vocabulário da tarefa antes de pedir que ele produza.
-
-3) ORGANIZAR (tipo "perguntas") — perguntas-guia curtas, cada uma com uma caixa
-   ao lado. O aluno EXTRAI da seção 1 e escreve em pedaços pequenos.
-
-4) PRODUZIR (tipo "producao") — caixas coloridas com FRASES JÁ COMEÇADAS, onde
-   ___ marca onde o aluno continua. Ex: "O evento acontecerá no dia ___, às ___".
-   Esta é a seção mais importante: nunca entregue uma caixa vazia.
-   As cores aqui DEVEM repetir as da seção 2, para o aluno ligar uma à outra.
-
-5) REVISAR (tipo "checklist") — "Minha notícia tem:" com itens para o aluno
-   conferir sozinho. Devolve o controle a ele.
-
-Nem toda atividade precisa das cinco, MAS A DE PRODUÇÃO É OBRIGATÓRIA: toda
-folha tem exatamente uma seção "tipo":"producao", com frases já começadas e ___
-onde o aluno continua. É nela que o estudante de fato realiza a tarefa; sem ela
-a folha vira só leitura e marcação.
-Não substitua a produção por múltipla escolha dentro de "perguntas": a pílula de
-pergunta é curta e as opções ficam espremidas e ilegíveis.
-SEMPRE feche com a "chamada_final" de incentivo.
-
-NÃO numere o título da seção. O campo "numero" já desenha a bolinha; escrever
-"1. VEJA AS INFORMAÇÕES" faz o número aparecer duas vezes.
-
-==================================================
-REGRAS VISUAIS
-==================================================
-
-- TUDO EM UMA PÁGINA. Use "largura":"metade" em quase todas as seções, para
-  caírem lado a lado. Reserve "inteira" para no máximo uma.
-- Entre 4 e 5 seções. Menos que isso deixa a folha vazia; mais, estoura a página.
-- TUDO PRECISA CABER EM UMA PÁGINA A4. Respeite os limites por seção:
-  no máximo 4 dados em "info", 3 pares em "relacionar", 4 perguntas,
-  3 campos em "producao" e 5 itens no checklist.
-  Em "producao", cada campo tem no máximo 2 linhas de frase: uma frase começada
-  longa demais empurra a chamada final para fora da folha.
-- Cores disponíveis: azul, verde, roxo, amarelo, laranja, creme, cinza. Use cores
-  DIFERENTES em seções vizinhas, e repita a mesma cor quando duas partes da
-  folha se referem à mesma coisa.
-- Ícones são EMOJI no texto, não imagens: 📅 🕐 📍 👥 ❓ ✏️ 📝 💡 ⭐ 📣 🔎 💰
-- A folha leva QUATRO ilustrações coloridas, e todas importam para o visual:
-  1. "ilustracao_topo": um objeto que simbolize a tarefa (megafone, lápis, lupa).
-  2. A seção "info": a CENA do tema, o assunto da atividade.
-  3. UMA outra seção: um objeto decorativo ligado ao tema.
-  4. "chamada_final": um objeto que feche a ideia (jornal, troféu, estrela).
-  DESCREVA BEM CADA UMA, em 15 a 25 palavras, em português. Uma descrição curta
-  devolve um ícone genérico; uma descrição rica devolve a cena certa.
-  Diga: o objeto principal, os detalhes que importam, o cenário e as cores.
-  Fraco:  "uma livraria".
-  Bom:    "fachada de uma livraria comunitária com porta de vidro aberta, letreiro
-           azul na frente, prateleiras cheias de livros coloridos lá dentro e uma
-           pilha de livros na calçada, plantas verdes ao lado".
-  Fraco:  "um jornal".
-  Bom:    "um jornal dobrado com a palavra NOTÍCIA bem grande na capa, uma foto e
-           linhas de texto, com algumas estrelinhas de destaque em volta".
-  Nunca peça desenho de letra isolada ou de sílaba.
-- Enunciados curtos. O "subtitulo" de cada seção tem no máximo 10 palavras.
-
-==================================================
-A ADAPTAÇÃO AO ESTUDANTE
-==================================================
-
-O perfil acima decide o GRAU DE APOIO, não o visual:
-- Mais apoio: mais frases começadas, menos lacunas por frase, respostas por
-  marcar ou ligar em vez de escrever, checklist mais detalhado.
-- Menos apoio: lacunas maiores, perguntas abertas, menos modelo pronto.
-- Hiperfocos e interesses entram SOMENTE na ilustração, na frase de incentivo e no
-  exemplo resolvido. Nunca no conteúdo: não troque as palavras, o tema ou os
-  personagens que vieram no texto para aproximá-los do interesse do estudante.
-- Se o estudante ainda não escreve, troque a seção de produção por uma de
-  "relacionar" ou "perguntas" com resposta por desenho.
-
-==================================================
-O QUE O PROFESSOR PEDIU
-==================================================
-
+A ATIVIDADE — este é o conteúdo da folha:
 ${conteudo}
 
-FIDELIDADE — REGRA ACIMA DAS DEMAIS:
-O texto acima já passou pela adaptação pedagógica. Aqui você NÃO reescreve nada.
-
-Copie LITERALMENTE para a folha: as palavras das listas, os textos, os números, as
-datas, os nomes, os personagens e o que cada pergunta pergunta. Se o texto traz
-BOLA, GATO, CASA e PATO, a folha traz essas quatro palavras, nessa ordem, sem
-acrescentar nem tirar nenhuma — ainda que o estudante goste de outro assunto.
-
-Você decide APENAS a apresentação: quais seções usar, em que ordem, com que cor,
-onde entram as lacunas e quanto apoio dar. Encurtar uma INSTRUÇÃO é permitido;
-mudar o CONTEÚDO não é.
-
-Se algum item não couber em nenhuma seção, prefira usar a seção "texto" a
-descartá-lo. Perder um item do professor é pior que uma folha menos bonita.
-
-Responda APENAS com um JSON válido neste formato, sem markdown e sem cercas:
-${ESQUEMA}`;
+Esse conteúdo já foi definido com o professor: mantenha as palavras, os textos, os números,
+os nomes e as perguntas. Como apresentar é decisão sua.
+${sobreMaterial}
+FORMATO DA RESPOSTA — são exigências técnicas, não estéticas:
+- Responda apenas com um documento HTML completo, de <!DOCTYPE html> a </html>, com o CSS
+  dentro de <style>. Sem markdown, sem cercas de código, sem comentário antes ou depois.
+- A página tem 794px de largura (A4 a 96 dpi). Não use vw, vh nem position: fixed, e não
+  fixe a altura das páginas: o sistema divide o documento em folhas A4 sozinho, sem
+  encolher nada. Para começar uma página nova num ponto exato, use style="break-before: page".
+  Use break-inside: avoid nos blocos que não podem ser partidos entre duas páginas.
+- A folha é capturada como tela: não dependa de @media print.
+- Sem JavaScript, sem links externos e sem fontes da internet. Fontes disponíveis:
+  Arial, Verdana, Tahoma, Trebuchet MS, Georgia, Inter e Outfit.
+- Sem <input>, <textarea> ou outros campos de formulário: a folha é de papel. Para o aluno
+  escrever, desenhe linhas ou caixas com CSS.
+- Ilustrações: você não desenha nem busca imagens. Onde quiser uma, escreva
+  <img data-ilustracao="descrição em português, de 15 a 25 palavras, do objeto ou da cena" alt="...">
+  e o sistema gera a imagem nesse lugar. Cada marcação [IMAGEM: ...] da atividade vira uma
+  dessas, no mesmo ponto. No máximo ${MAX_IMAGENS} na folha inteira. Defina o tamanho de cada
+  uma pelo CSS. Nunca peça figura com letras, palavras ou texto escrito dentro.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,27 +102,6 @@ const ESTILO_ILUSTRACAO =
   "colorful flat vector illustration, modern clean style, vibrant friendly colors, " +
   "bold simple shapes, plain white background, centered composition, " +
   "educational material for children, cheerful and friendly";
-
-/**
- * Extrai as marcações [IMAGEM: ...] do texto da atividade, na ordem em que
- * aparecem, e devolve o texto já limpo.
- *
- * Isso é feito em código, não pelo modelo: ao pedir que ele próprio convertesse as
- * marcações em "imagem_prompt", ele descartava a maioria — numa folha de
- * alfabetização, onde a figura é o conteúdo principal, perder imagem é perder a
- * atividade.
- */
-function extrairImagens(texto: string): { limpo: string; descricoes: string[] } {
-  const descricoes: string[] = [];
-  const limpo = (texto || "").replace(
-    /\[\s*(?:IMAGEM|IMAGE|FIGURA|DESENHO)\s*:\s*([^\]]+)\]/gi,
-    (_m, desc: string) => {
-      descricoes.push(String(desc).trim().slice(0, 120));
-      return "";
-    },
-  );
-  return { limpo: limpo.replace(/[ \t]{2,}/g, " ").trim(), descricoes };
-}
 
 const MODELO_IMAGEM = "google/gemini-3-pro-image";
 let ultimoErroImagem = "";
@@ -337,6 +161,44 @@ async function baixarIlustracao(prompt: string, apiKey: string): Promise<string 
   } finally {
     clearTimeout(timer);
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Utilidades de HTML
+// ---------------------------------------------------------------------------
+
+/** Tira cercas de código e qualquer texto fora do documento. */
+function extrairHtml(bruto: string): string {
+  let t = bruto.trim().replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  const ini = t.search(/<!DOCTYPE html|<html[\s>]/i);
+  const fim = t.toLowerCase().lastIndexOf("</html>");
+  if (ini >= 0 && fim > ini) t = t.slice(ini, fim + 7);
+  return t;
+}
+
+/**
+ * Primeira camada de limpeza. A segunda, que é a que vale, roda no navegador com
+ * DOMPurify antes de qualquer renderização. Aqui só se retira o que nunca deveria
+ * ter vindo: script, frames, recursos externos e handlers de evento.
+ */
+function limparHtml(h: string): string {
+  return h
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<(iframe|object|embed|frame|frameset|applet|base|link|meta|form)\b[^>]*>/gi, "")
+    .replace(/<\/(iframe|object|embed|frame|frameset|applet|form)\s*>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|src|srcset)\s*=\s*("|')\s*(?:javascript|https?|\/\/)[^"']*\2/gi, "")
+    .replace(/@import[^;]+;/gi, "")
+    .replace(/url\(\s*(['"]?)(?!data:)[^)]*\1\s*\)/gi, "none");
+}
+
+function escAttr(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function textoDe(s?: string) {
+  return (s ?? "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 serve(async (req) => {
@@ -429,14 +291,10 @@ serve(async (req) => {
       if (ok.length) ctx += `\n${ok.join("\n")}`;
     }
 
-    // As ilustrações são retiradas do texto aqui e reatribuídas aos blocos depois,
-    // sem depender de o modelo preservá-las.
-    const { limpo: textoSemImagens, descricoes: descImagens } = extrairImagens(texto);
-
-    // Mensagem do usuário: prompt + o material anexado, para o modelo escrever
-    // enunciados que apontem para o que realmente está na imagem.
+    // Ilustrações já marcadas na atividade ficam no texto: o modelo as converte
+    // em <img data-ilustracao> no ponto em que fizer sentido no layout dele.
     const partesUsuario: unknown[] = [
-      { type: "text", text: montarPrompt(ctx, textoSemImagens, listaAnexos.length > 0) },
+      { type: "text", text: montarPrompt(ctx, texto, listaAnexos.length > 0) },
     ];
     for (const a of listaAnexos) {
       const dataUrl = `data:${a.mime};base64,${a.data}`;
@@ -447,7 +305,6 @@ serve(async (req) => {
       }
     }
 
-    // Chamada ao modelo
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     let resp: Response;
@@ -464,14 +321,13 @@ serve(async (req) => {
         body: JSON.stringify({
           model: MODELO,
           max_tokens: MAX_TOKENS,
-          response_format: { type: "json_object" },
           reasoning: RACIOCINIO,
-          messages: [
-            { role: "system", content: "Você devolve APENAS JSON válido, sem markdown e sem cercas de código." },
-            { role: "user", content: partesUsuario },
-          ],
+          messages: [{ role: "user", content: partesUsuario }],
         }),
       });
+    } catch (e) {
+      const abortado = (e as Error).name === "AbortError";
+      return json({ error: abortado ? "O modelo demorou demais para montar a folha." : "Falha ao chamar o modelo." }, 504, origin);
     } finally {
       clearTimeout(timer);
     }
@@ -483,101 +339,83 @@ serve(async (req) => {
     }
 
     const data = await resp.json();
-    let bruto: string = data?.choices?.[0]?.message?.content ?? "";
-    bruto = bruto.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
-
-    let folha: Record<string, unknown>;
-    try {
-      folha = JSON.parse(bruto);
-    } catch {
-      console.error("JSON inválido do modelo:", bruto.slice(0, 400));
+    let html = extrairHtml(String(data?.choices?.[0]?.message?.content ?? ""));
+    if (!/<body[\s>]/i.test(html) || html.length < 200) {
+      console.error("HTML inválido do modelo:", html.slice(0, 300));
       return json({ error: "O modelo devolveu um formato inesperado. Tente de novo." }, 502, origin);
     }
+    html = limparHtml(html);
 
-    // -------- Pós-processamento: o que não se confia ao modelo --------
+    // Marcação [IMAGEM: ...] que o modelo deixou como texto também vira ilustração.
+    // Só no texto visível: dentro de um atributo ou do <style>, virar tag quebraria o HTML.
     {
-      const secoes = (folha.secoes ?? []) as SecaoBruta[];
-
-      // 1) Numeração sequencial. O modelo repete ou reinicia a contagem.
-      secoes.forEach((sec, i) => { sec.numero = i + 1; });
-
-      // 2) Ilustrações: a da seção "info" recebe a descrição vinda da adaptação,
-      //    que conhece o tema; as demais ficam com o que o modelo pediu. Seções
-      //    extras além de uma perdem a figura, para a folha não virar álbum.
-      let comInfo = false;
-      let decorativas = 0;
-      for (const sec of secoes) {
-        if (sec.tipo === "info" && !comInfo) {
-          if (descImagens.length > 0) sec.imagem_prompt = descImagens[0];
-          comInfo = true;
-        } else if (sec.imagem_prompt) {
-          decorativas += 1;
-          if (decorativas > 1) delete sec.imagem_prompt;
+      let emStyle = false;
+      html = html.split(/(<[^>]+>)/).map((parte) => {
+        if (parte.startsWith("<")) {
+          if (/^<style\b/i.test(parte)) emStyle = true;
+          else if (/^<\/style/i.test(parte)) emStyle = false;
+          return parte;
         }
-      }
-
-      // 3) Largura: só uma seção pode ocupar a página inteira, senão a folha
-      //    vira uma coluna só e estoura para a segunda página.
-      let inteiras = 0;
-      for (const sec of secoes) {
-        if (sec.largura === "inteira") {
-          inteiras += 1;
-          if (inteiras > 1) sec.largura = "metade";
-        }
-      }
-
-      // 4) Fonte: o modelo já devolveu "Lexend | Verdana", copiando o exemplo.
-      const cfg = (folha.config ?? {}) as Record<string, unknown>;
-      const bruta = String(cfg.fonte ?? "").toLowerCase();
-      cfg.fonte = bruta.includes("lexend") ? "Lexend" : "Verdana";
-      const tam = Number(cfg.tamanho_pt);
-      cfg.tamanho_pt = Number.isFinite(tam) ? Math.min(14, Math.max(9, tam)) : 11;
-      folha.config = cfg;
-
-      console.log(`folha: ${secoes.length} seções, ${secoes.filter((x) => x.imagem_prompt).length} ilustração`);
+        if (emStyle) return parte;
+        return parte.replace(
+          /\[\s*(?:IMAGEM|IMAGE|FIGURA|DESENHO)\s*:\s*([^\]]+)\]/gi,
+          (_m, d: string) => `<img data-ilustracao="${escAttr(d.trim())}" alt="" style="max-width:220px;display:block;margin:8px auto;">`,
+        );
+      }).join("");
     }
 
-    // Ilustrações embutidas em base64
-    if (com_imagens !== false) {
-      type ComImagem = { imagem_prompt?: string; imagem?: string };
-      const alvos: ComImagem[] = [
-        folha.ilustracao_topo as ComImagem,
-        ...((folha.secoes ?? []) as SecaoBruta[]),
-        folha.chamada_final as ComImagem,
-      ].filter((x): x is ComImagem => !!x?.imagem_prompt).slice(0, MAX_IMAGENS);
-      const imagens = await Promise.all(
-        alvos.map((sec) => baixarIlustracao(`${sec.imagem_prompt!}, ${ESTILO_ILUSTRACAO}`, apiKey)),
-      );
-      alvos.forEach((sec, i) => {
-        if (imagens[i]) sec.imagem = imagens[i]!;
-        delete sec.imagem_prompt;
-      });
-      // Falha de ilustração não derruba a folha, mas também não pode passar em
-      // silêncio: sem aviso, o professor vê a folha sem figura e acha que o
-      // sistema é assim mesmo.
+    // -------- Ilustrações --------
+    const tags = [...html.matchAll(/<img\b[^>]*\bdata-ilustracao\s*=\s*("([^"]*)"|'([^']*)')[^>]*>/gi)];
+    const alvos = tags.slice(0, MAX_IMAGENS);
+    let aviso_imagens: string | undefined;
+    if (alvos.length > 0 && com_imagens !== false) {
+      const imagens = await Promise.all(alvos.map((m) => {
+        const desc = (m[2] ?? m[3] ?? "").trim().slice(0, 300);
+        return desc ? baixarIlustracao(`${desc}, ${ESTILO_ILUSTRACAO}`, apiKey) : Promise.resolve(null);
+      }));
+      // Substitui de trás para frente para os índices não se deslocarem.
+      for (let i = alvos.length - 1; i >= 0; i--) {
+        const m = alvos[i];
+        const ini = m.index!;
+        const fim = ini + m[0].length;
+        const novo = imagens[i]
+          ? m[0].replace(/\bdata-ilustracao\s*=\s*("[^"]*"|'[^']*')/i, `src="${imagens[i]}"`)
+          : "";
+        html = html.slice(0, ini) + novo + html.slice(fim);
+      }
       const obtidas = imagens.filter(Boolean).length;
       if (obtidas < alvos.length) {
-        folha.aviso_imagens = ultimoErroImagem.includes("402")
+        aviso_imagens = ultimoErroImagem.includes("402")
           ? "As ilustrações não foram geradas: a OpenRouter exige pelo menos US$ 1,00 de folga no limite da chave para gerar imagem. Aumente o limite em openrouter.ai/settings/keys ou adicione créditos."
           : `Só ${obtidas} de ${alvos.length} ilustrações foram geradas. Tente novamente em alguns instantes.`;
       }
     }
+    // Marcações além do teto, ou com imagens desligadas, saem da folha.
+    html = html.replace(/<img\b[^>]*\bdata-ilustracao\b[^>]*>/gi, "");
 
-    // O material anexado é embutido pelo servidor, não pelo modelo: assim ele
-    // aparece impresso na folha exatamente como o professor enviou.
+    // -------- Material anexado --------
+    // Embutido pelo servidor, exatamente como o professor enviou.
     if (imagemMaterial) {
-      folha.material_original = {
-        imagem: `data:${imagemMaterial.mime};base64,${imagemMaterial.data}`,
-        legenda: typeof folha.legenda_material === "string" && folha.legenda_material.trim()
-          ? folha.legenda_material.trim()
-          : "Material da atividade",
-      };
-
+      const src = `data:${imagemMaterial.mime};base64,${imagemMaterial.data}`;
+      let colocado = false;
+      html = html.replace(/<img\b[^>]*\bdata-material\b[^>]*>/gi, (tag) => {
+        if (colocado) return "";
+        colocado = true;
+        return tag.replace(/\bdata-material\b(\s*=\s*("[^"]*"|'[^']*'))?/i, `src="${src}"`);
+      });
+      if (!colocado) {
+        html = html.replace(/<body([^>]*)>/i, (b) =>
+          `${b}<div style="text-align:center;margin:16px 0;break-inside:avoid;"><img src="${src}" alt="material da atividade" style="max-width:100%;max-height:520px;object-fit:contain;"></div>`);
+      }
+    } else {
+      html = html.replace(/<img\b[^>]*\bdata-material\b[^>]*>/gi, "");
     }
-    delete folha.legenda_material;
 
-    folha.aluno = aluno.nome;
-    return json(folha, 200, origin);
+    const titulo = textoDe(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1])
+      || textoDe(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1])
+      || "Folha de atividade";
+
+    return json({ titulo, html, aluno: aluno.nome, ...(aviso_imagens ? { aviso_imagens } : {}) }, 200, origin);
   } catch (e) {
     console.error("gerar-folha erro:", e);
     return json({ error: "Erro inesperado ao gerar a folha." }, 500, origin);

@@ -30,7 +30,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { folhaParaDocx, folhaHtmlCompleto, paginaHtml, type Folha } from "@/lib/folha";
+import {
+  folhaParaHtml, paginasParaDocx, paginasParaPdf, renderizarPaginas, type FolhaLivre,
+} from "@/lib/folhaLivre";
 import {
   Select,
   SelectContent,
@@ -185,11 +187,14 @@ const AssistentePage = () => {
   const [attachments, setAttachments] = useState<{ file: File; preview?: string }[]>([]);
   // Modo adaptação: com um aluno selecionado, a mensagem vira uma comparação entre modelos.
   const [exportandoTudo, setExportandoTudo] = useState(false);
-  const [folha, setFolha] = useState<Folha | null>(null);
+  const [folha, setFolha] = useState<FolhaLivre | null>(null);
+  // Páginas A4 já renderizadas da folha aberta: a prévia mostra exatamente o que sai no PDF.
+  const [paginasPrevia, setPaginasPrevia] = useState<string[] | null>(null);
+  const paginasRef = useRef<HTMLCanvasElement[] | null>(null);
   const [gerandoFolha, setGerandoFolha] = useState<string | null>(null);
   // Folhas preparadas em segundo plano, por mensagem+modelo. Ficam só na sessão:
   // cada uma carrega vários MB de imagem em base64 e não cabe no banco.
-  const [folhasProntas, setFolhasProntas] = useState<Record<string, Folha>>({});
+  const [folhasProntas, setFolhasProntas] = useState<Record<string, FolhaLivre>>({});
   const [folhasEmPreparo, setFolhasEmPreparo] = useState<Record<string, boolean>>({});
   const [orientacaoAberta, setOrientacaoAberta] = useState<string | null>(null);
   const [exportandoFolha, setExportandoFolha] = useState<string | null>(null);
@@ -823,7 +828,7 @@ const AssistentePage = () => {
   };
 
   // ---------------------------------------------------------------------
-  // Folha de atividade: o layout é decidido pelo perfil do aluno
+  // Folha de atividade: layout livre, desenhado pelo modelo e paginado aqui
   // ---------------------------------------------------------------------
 
   /** Baixa do storage um material salvo e devolve em base64. */
@@ -850,7 +855,7 @@ const AssistentePage = () => {
     alunoDaFolha: string,
     conteudo: string,
     msg?: Message,
-  ): Promise<Folha> => {
+  ): Promise<FolhaLivre> => {
     // Na sessão o anexo está em memória; depois de recarregar, vem do storage.
     let anexos = msg?.anexos;
     if ((!anexos || anexos.length === 0) && msg?.material) {
@@ -869,7 +874,7 @@ const AssistentePage = () => {
     });
     const result = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
-    return result as Folha;
+    return result as FolhaLivre;
   };
 
   /**
@@ -939,84 +944,56 @@ const AssistentePage = () => {
     }
   };
 
-  /** Renderiza uma página fora da tela e devolve o canvas, para PDF e PNG. */
-  const renderizarPagina = async (f: Folha, idx: number): Promise<HTMLCanvasElement> => {
-    const host = document.createElement("div");
-    host.style.cssText = "position:fixed;left:-10000px;top:0;background:#fff;";
-    host.innerHTML = paginaHtml(f, idx);
-    document.body.appendChild(host);
-    try {
-      // Espera as imagens embutidas decodificarem antes de capturar.
-      const imgs = Array.from(host.querySelectorAll("img"));
-      await Promise.all(imgs.map((im) =>
-        im.complete ? Promise.resolve() : new Promise((r) => { im.onload = r; im.onerror = r; })
-      ));
-
-      // O contêiner tem SEMPRE a proporção exata de um A4. A captura é feita
-      // nele, nunca no elemento interno: capturando o interno, o canvas saía
-      // com outra proporção e o addImage, que força 210x297mm, esticava a folha
-      // só na horizontal — círculos viravam ovais e quadrados, retângulos.
-      const LARG = 794, ALT = 1123;
-      host.style.width = `${LARG}px`;
-      host.style.height = `${ALT}px`;
-      host.style.overflow = "hidden";
-
-      // Garantia de página única: se o conteúdo passa do A4, a folha encolhe
-      // proporcionalmente para caber, em vez de perder a parte de baixo.
-      const alvo = host.firstElementChild as HTMLElement;
-      const altura = alvo.scrollHeight;
-      if (altura > ALT) {
-        const fator = Math.max(0.68, ALT / altura);
-        alvo.style.transformOrigin = "top left";
-        alvo.style.transform = `scale(${fator})`;
-        await new Promise((r) => setTimeout(r, 60));
-      }
-
-      return await html2canvas(host, {
-        width: LARG, height: ALT, windowWidth: LARG, windowHeight: ALT,
-        scale: 2, backgroundColor: "#ffffff", useCORS: true, logging: false,
+  // Renderiza as páginas assim que uma folha é aberta. Nada encolhe: o que não
+  // cabe numa página A4 continua na seguinte.
+  useEffect(() => {
+    let cancelado = false;
+    paginasRef.current = null;
+    setPaginasPrevia(null);
+    if (!folha) return;
+    renderizarPaginas(folha)
+      .then((pags) => {
+        if (cancelado) return;
+        paginasRef.current = pags;
+        setPaginasPrevia(pags.map((c) => c.toDataURL("image/png")));
+      })
+      .catch((e) => {
+        if (cancelado) return;
+        toast({ title: "Erro ao montar as páginas", description: (e as Error).message, variant: "destructive" });
+        setPaginasPrevia([]);
       });
-    } finally {
-      document.body.removeChild(host);
-    }
-  };
+    return () => { cancelado = true; };
+  }, [folha]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const nomeBase = (f: Folha) =>
+  const nomeBase = (f: FolhaLivre) =>
     `${slug(f.titulo || "atividade")}-${slug(f.aluno || "aluno")}`;
 
   const exportarFolha = async (formato: "pdf" | "png" | "docx" | "html") => {
     if (!folha) return;
     setExportandoFolha(formato);
     try {
-      const totalPaginas = 1;  // a folha cabe numa página A4
-
-      if (formato === "docx") {
-        downloadBlob(await folhaParaDocx(folha), `${nomeBase(folha)}.docx`);
-      } else if (formato === "html") {
+      if (formato === "html") {
         downloadBlob(
-          new Blob([folhaHtmlCompleto(folha)], { type: "text/html;charset=utf-8" }),
+          new Blob([folhaParaHtml(folha)], { type: "text/html;charset=utf-8" }),
           `${nomeBase(folha)}.html`,
         );
-      } else if (formato === "png") {
-        for (let i = 0; i < totalPaginas; i++) {
-          const canvas = await renderizarPagina(folha, i);
-          const blob: Blob | null = await new Promise((r) => canvas.toBlob(r, "image/png"));
-          if (blob) {
-            downloadBlob(blob, totalPaginas > 1
-              ? `${nomeBase(folha)}-pagina-${i + 1}.png`
-              : `${nomeBase(folha)}.png`);
+      } else {
+        const paginas = paginasRef.current ?? await renderizarPaginas(folha);
+        paginasRef.current = paginas;
+        if (formato === "pdf") {
+          paginasParaPdf(paginas).save(`${nomeBase(folha)}.pdf`);
+        } else if (formato === "docx") {
+          downloadBlob(await paginasParaDocx(paginas), `${nomeBase(folha)}.docx`);
+        } else {
+          for (let i = 0; i < paginas.length; i++) {
+            const blob: Blob | null = await new Promise((r) => paginas[i].toBlob(r, "image/png"));
+            if (blob) {
+              downloadBlob(blob, paginas.length > 1
+                ? `${nomeBase(folha)}-pagina-${i + 1}.png`
+                : `${nomeBase(folha)}.png`);
+            }
           }
         }
-      } else {
-        const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-        for (let i = 0; i < totalPaginas; i++) {
-          const canvas = await renderizarPagina(folha, i);
-          if (i > 0) pdf.addPage();
-          // PNG, não JPEG: a folha é quase toda branca, e a compressão JPEG deixava
-          // faixas acinzentadas em volta dos desenhos de contorno.
-          pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 210, 297, undefined, "FAST");
-        }
-        pdf.save(`${nomeBase(folha)}.pdf`);
       }
       toast({ title: `Folha exportada (${formato.toUpperCase()})` });
     } catch (e) {
@@ -1714,7 +1691,9 @@ const AssistentePage = () => {
               {folha?.titulo || "Folha de atividade"}
             </DialogTitle>
             <DialogDescription>
-              Adaptada para {folha?.aluno} · {(folha?.secoes ?? []).length} seções
+              Adaptada para {folha?.aluno}
+              {paginasPrevia && paginasPrevia.length > 0 &&
+                ` · ${paginasPrevia.length} ${paginasPrevia.length === 1 ? "página" : "páginas"} A4`}
             </DialogDescription>
           </DialogHeader>
 
@@ -1722,22 +1701,6 @@ const AssistentePage = () => {
             <div className="rounded-xl border border-warning/40 bg-warning/10 p-3 flex gap-2 items-start">
               <AlertCircle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
               <p className="text-xs text-foreground">{folha.aviso_imagens}</p>
-            </div>
-          )}
-
-          {(folha?.adaptacoes_aplicadas ?? []).length > 0 && (
-            <div className="rounded-xl border border-border bg-muted/40 p-4">
-              <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
-                O que foi adaptado no layout, e por quê
-              </p>
-              <ul className="space-y-1">
-                {folha!.adaptacoes_aplicadas!.map((a, i) => (
-                  <li key={i} className="text-xs text-muted-foreground flex gap-2">
-                    <span className="text-primary">•</span><span>{a}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 
@@ -1763,16 +1726,22 @@ const AssistentePage = () => {
             ))}
           </div>
 
-          {/* Pré-visualização da folha, reduzida para caber na janela.
-              O corpo do Dialog é montado mesmo com ele fechado, então a
-              renderização só pode acontecer quando há folha de verdade. */}
+          {/* Pré-visualização: as próprias páginas que vão para o PDF, em tamanho real. */}
           {folha && (
-            <div className="bg-muted/30 rounded-xl p-4">
-              <div className="overflow-hidden rounded-lg border border-border bg-white shadow-sm mx-auto"
-                   style={{ width: 636, height: 899 }}>
-                <div style={{ transform: "scale(0.8)", transformOrigin: "top left" }}
-                     dangerouslySetInnerHTML={{ __html: paginaHtml(folha) }} />
-              </div>
+            <div className="bg-muted/30 rounded-xl p-4 space-y-4">
+              {paginasPrevia === null ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Montando as páginas…
+                </div>
+              ) : paginasPrevia.map((src, i) => (
+                <div key={i} className="mx-auto" style={{ width: 794, maxWidth: "100%" }}>
+                  <p className="text-[11px] text-muted-foreground mb-1">
+                    Página {i + 1} de {paginasPrevia.length}
+                  </p>
+                  <img src={src} alt={`Página ${i + 1}`}
+                       className="block w-full h-auto rounded-lg border border-border bg-white shadow-sm" />
+                </div>
+              ))}
             </div>
           )}
         </DialogContent>
