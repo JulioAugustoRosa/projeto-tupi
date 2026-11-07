@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -1570,8 +1571,8 @@ const AssistentePage = () => {
             )}
 
             {alunoId && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+              <Popover>
+                <PopoverTrigger asChild>
                   <Button variant="outline" size="sm" className="h-9 gap-2 text-sm">
                     <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
                     Como adaptar
@@ -1581,8 +1582,8 @@ const AssistentePage = () => {
                       </span>
                     )}
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-80 p-3 space-y-3">
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80 p-3 space-y-3">
                   <p className="text-[11px] leading-snug text-muted-foreground">
                     O conteúdo é sempre seu. Aqui você define como a IA pode apresentá-lo.
                   </p>
@@ -1658,8 +1659,8 @@ const AssistentePage = () => {
                       Limpar opções
                     </Button>
                   )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </PopoverContent>
+              </Popover>
             )}
 
             {alunoId && (
