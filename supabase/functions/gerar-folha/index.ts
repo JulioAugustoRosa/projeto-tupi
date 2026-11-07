@@ -60,9 +60,32 @@ aparecer e escreva os enunciados apontando para ele. Não transcreva o material 
 materiais didáticos. Monte a folha de atividade deste estudante, pronta para imprimir e
 entregar a ele.
 
-Você tem liberdade total: escolha o layout, a organização, as cores, a tipografia, o
+Você tem liberdade para escolher o layout, a organização, as cores, a tipografia, o
 espaçamento e quantas páginas forem necessárias. Faça a melhor folha que você faria
 para este estudante, considerando o perfil abaixo.
+
+COMO COSTUMAM SER AS FOLHAS QUE FUNCIONAM — REFERÊNCIA, NÃO MOLDE
+As folhas que professoras aprovaram para estudantes como este são sóbrias e respiram:
+- cabeçalho discreto (disciplina • ano), título, e uma linha de NOME e DATA;
+- partes numeradas, cada uma com um subtítulo colorido e o texto em preto, em letra
+  grande e com bastante espaço entre as linhas;
+- poucas caixas: um fundo claro para destacar o exemplo ou o banco de palavras, e o
+  resto direto na página, sem moldura em volta de tudo;
+- uma ilustração larga do tema logo depois da situação; outras só se ajudarem a entender;
+- páginas planejadas: em geral a primeira é para ler e entender, e a segunda para
+  praticar e produzir ("AGORA É SUA VEZ!"), repetindo o cabeçalho e a linha de NOME;
+- espaço em branco no pé da página é normal. Folha apertada não é.
+
+TAMANHO DA PÁGINA — ESTIME ANTES DE FECHAR CADA UMA
+Cada página tem cerca de 1.050px de altura útil. Para ter noção, em linhas: com letra
+de 14px e espaçamento confortável, cabem umas 35 linhas — planeje para 30, deixando
+folga, porque a conta nunca é exata. A ilustração larga
+ocupa o lugar de umas 12 linhas; o cabeçalho com título e NOME, umas 5; cada subtítulo
+de parte, umas 2; cada linha de resposta, umas 2. Some o que pôs em cada página.
+Uma página que transborda parece folha quebrada: o excedente vai sozinho para uma
+página quase vazia. Se a conta não fecha, planeje uma página a mais (break-before: page
+antes da parte que não cabe) — três páginas bem resolvidas são melhores que duas
+estourando. E nunca deixe uma parte começar no pé de uma página e terminar na outra.
 
 ${ctx}
 
@@ -70,7 +93,9 @@ A ATIVIDADE — este é o conteúdo da folha:
 ${conteudo}
 
 Esse conteúdo já foi definido com o professor: mantenha as palavras, os textos, os números,
-os nomes e as perguntas. Como apresentar é decisão sua.
+os nomes e as perguntas. Como apresentar é decisão sua. Se aparecerem marcadores entre
+colchetes, como [DIA] ou [NOME DO LOCAL], troque cada um por uma linha para o estudante
+preencher — colchete não é algo que ele saiba completar.
 ${sobreMaterial}
 FORMATO DA RESPOSTA — são exigências técnicas, não estéticas:
 - Responda apenas com um documento HTML completo, de <!DOCTYPE html> a </html>, com o CSS

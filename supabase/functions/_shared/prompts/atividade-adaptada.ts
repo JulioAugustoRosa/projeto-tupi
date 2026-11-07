@@ -204,6 +204,38 @@ Um estudante do 6º ano em fase silábica estuda o conteúdo do 6º ano com apoi
 silábico embutido. O apoio de alfabetização entra DENTRO da atividade do ano
 escolar, nunca no lugar dela.`;
 
+const REFERENCIA_RESULTADO = `==================================================
+COMO COSTUMA SER UMA BOA ATIVIDADE ADAPTADA — REFERÊNCIA, NÃO MOLDE
+==================================================
+
+Atividades aprovadas por professoras para estudantes como este têm qualidades em
+comum. Use-as como medida e como tom, não como formato obrigatório:
+
+- POUCO TEXTO, BEM ESCOLHIDO. Frases curtas, uma ideia por linha. A situação ou o
+  texto de apoio cabe em poucas linhas, por exemplo:
+    SUA ESCOLA VAI TER UMA APRESENTAÇÃO DE DANÇA.
+    VOCÊ E SEUS COLEGAS ENSAIAM HÁ DOIS MESES.
+    VOCÊ QUER CONVIDAR SEUS AVÓS PARA ASSISTIR.
+  Um texto longo, mesmo bem escrito, vira barreira para quem ainda decodifica devagar.
+- UMA COISA DE CADA VEZ. A atividade avança em partes curtas e numeradas — ler,
+  entender, praticar, produzir —, e cada parte pede uma ação só.
+- PRIMEIRO O MODELO, DEPOIS A VEZ DELE. Quando há produção, mostre um exemplo curto e
+  completo (um e-mail de quatro ou cinco linhas, não uma carta) e depois a mesma
+  estrutura com espaços para o estudante completar. Não repita um texto longo duas vezes.
+- RESPOSTA COM APOIO. Alternativas curtas — duas costumam bastar, sendo uma claramente
+  fora do contexto —, banco de palavras para completar frases, o primeiro item já
+  resolvido como exemplo.
+- ESCRITA PRÓPRIA, PEQUENA. Feche com uma frase do próprio estudante, sugerindo
+  palavras que ele pode usar.
+- DADO CONCRETO, NUNCA MARCADOR. Não escreva [DIA], [HORA], [NOME DO LOCAL] ou
+  [SEU NOME]: o estudante não sabe o que fazer com colchetes. Ponha um dado concreto
+  no texto (pode ser fictício) ou deixe uma linha para ele preencher.
+- O CONTEÚDO DO ANO CONTINUA LÁ. A notícia continua notícia, o e-mail continua e-mail;
+  o trabalho com sílabas ou com palavras entra como uma das partes, não no lugar.
+
+Se o professor exigiu preservar o texto original, o texto dele fica como está: a
+concisão vale para o que VOCÊ escreve — enunciados, exemplos e apoios.`;
+
 const MARCACAO_IMAGEM = `==================================================
 COMO MARCAR AS IMAGENS
 ==================================================
@@ -425,6 +457,7 @@ Quando houver registros, identifique estratégias que favoreceram a participaç�
 dificuldades recorrentes. Diferencie fato registrado de interpretação: não
 transforme uma observação isolada em característica permanente do estudante.`,
     REGRAS,
+    REFERENCIA_RESULTADO,
     FASES_ALFABETIZACAO,
     blocoFidelidade(professor, temConteudo),
     semImagens ? "" : MARCACAO_IMAGEM,

@@ -162,50 +162,154 @@ function montarElemento(p: HtmlPreparado): HTMLDivElement {
 // ---------------------------------------------------------------------------
 
 /**
+ * Linha de resposta sem largura: o modelo às vezes escreve "flex: 1" num elemento cujo
+ * pai não é flex, e a linha do NOME some. Elemento vazio, com borda embaixo e quase
+ * sem largura, ganha largura mínima — numa folha, linha de resposta é essencial.
+ */
+function garantirLinhasDeResposta(raiz: HTMLElement) {
+  raiz.querySelectorAll<HTMLElement>("*").forEach((el) => {
+    if (el.children.length > 0 || el.textContent?.trim() || /^(IMG|SVG|BR|HR|svg)$/.test(el.tagName)) return;
+    const cs = getComputedStyle(el);
+    if (!(parseFloat(cs.borderBottomWidth) > 0) || cs.borderBottomStyle === "none") return;
+    if (el.getBoundingClientRect().width >= 8) return;
+    if (cs.display === "inline") el.style.display = "inline-block";
+    el.style.minWidth = "220px";
+  });
+}
+
+/**
+ * O modelo planeja as páginas (break-before: page), mas não estima altura em pixels:
+ * a página planejada costuma passar 3% a 10% do limite, e o excedente ia sozinho para
+ * uma página quase vazia. Quando uma página planejada estoura em até 25%, aqui se
+ * reduz SÓ o espaço em branco entre os blocos dela — margens, recuos internos e vãos —,
+ * em passos, até no mínimo 60% do original. Letra, entrelinha, linhas de resposta e
+ * imagens não mudam de tamanho. Se nem assim couber, tudo volta ao original e a
+ * paginação normal assume.
+ */
+function ajustarRespiro(raiz: HTMLElement) {
+  const topo = () => raiz.getBoundingClientRect().top;
+  const marcos = Array.from(raiz.querySelectorAll<HTMLElement>("*")).filter((el) =>
+    /page|always/.test(getComputedStyle(el).breakBefore ||
+      (getComputedStyle(el) as unknown as { pageBreakBefore?: string }).pageBreakBefore || ""));
+  const fimDo = (k: number) => k < marcos.length
+    ? marcos[k].getBoundingClientRect().top - topo()
+    : raiz.scrollHeight;
+  const inicioDo = (k: number) => (k === 0 ? 0 : marcos[k - 1].getBoundingClientRect().top - topo());
+  const props = ["marginTop", "marginBottom", "paddingTop", "paddingBottom", "rowGap"] as const;
+  const css: Record<(typeof props)[number], string> = {
+    marginTop: "margin-top", marginBottom: "margin-bottom", paddingTop: "padding-top",
+    paddingBottom: "padding-bottom", rowGap: "row-gap",
+  };
+
+  for (let k = 0; k <= marcos.length; k++) {
+    const ini = inicioDo(k);
+    const altura = fimDo(k) - ini;
+    if (altura <= ALTURA_UTIL || altura > ALTURA_UTIL * 1.25) continue;
+
+    const fim = fimDo(k);
+    const doTrecho = Array.from(raiz.querySelectorAll<HTMLElement>("*")).filter((el) => {
+      if (el.tagName === "STYLE") return false;
+      const r = el.getBoundingClientRect();
+      return r.top - topo() >= ini - 1 && r.bottom - topo() <= fim + 1;
+    });
+    const originais = doTrecho.map((el) => {
+      const cs = getComputedStyle(el);
+      return props.map((p) => parseFloat(cs[p] as string) || 0);
+    });
+    const inline = doTrecho.map((el) => el.getAttribute("style"));
+
+    let coube = false;
+    for (const f of [0.85, 0.7, 0.6]) {
+      doTrecho.forEach((el, i) => {
+        props.forEach((p, j) => {
+          const v = originais[i][j];
+          if (v > 0) el.style.setProperty(css[p], `${(v * f).toFixed(2)}px`, "important");
+        });
+      });
+      if (fimDo(k) - inicioDo(k) <= ALTURA_UTIL) { coube = true; break; }
+    }
+    if (!coube) {
+      doTrecho.forEach((el, i) => {
+        const orig = inline[i];
+        if (orig === null) el.removeAttribute("style"); else el.setAttribute("style", orig);
+      });
+    }
+  }
+}
+
+/**
  * Devolve as fronteiras das páginas, em px a partir do topo da folha:
  * [0, corte1, corte2, ..., alturaTotal].
  */
 function calcularCortes(raiz: HTMLElement): number[] {
   const origem = raiz.getBoundingClientRect().top;
   const total = Math.ceil(raiz.scrollHeight);
-  const proibidos: [number, number][] = [];
+  type Faixa = [number, number];
+  // Três níveis de "não cortar aqui", do mais forte ao mais fraco:
+  const linhas: Faixa[] = [];      // linha de texto: nunca
+  const pecas: Faixa[] = [];       // imagem, linha de tabela, bloco pequeno
+  const caixas: Faixa[] = [];      // caixa com borda, fundo ou sombra; bloco "não partir"
   const forcados: number[] = [];
 
-  // Cada linha de texto renderizada é indivisível.
   const range = document.createRange();
   const walker = document.createTreeWalker(raiz, NodeFilter.SHOW_TEXT);
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     if (!n.textContent?.trim() || n.parentElement?.tagName === "STYLE") continue;
     range.selectNodeContents(n);
     for (const r of Array.from(range.getClientRects())) {
-      if (r.height > 0) proibidos.push([r.top - origem, r.bottom - origem]);
+      if (r.height > 0) linhas.push([r.top - origem, r.bottom - origem]);
     }
   }
+
+  const visivel = (cor: string) => {
+    const m = cor.match(/rgba?\(([^)]+)\)/);
+    if (!m) return false;
+    const [r, g, b, a = "1"] = m[1].split(",").map((x) => x.trim());
+    if (parseFloat(a) === 0) return false;
+    return !(Number(r) > 250 && Number(g) > 250 && Number(b) > 250);
+  };
 
   raiz.querySelectorAll<HTMLElement>("*").forEach((el) => {
     if (el.tagName === "STYLE") return;
     const r = el.getBoundingClientRect();
     if (r.height <= 0) return;
-    const t = r.top - origem, b = r.bottom - origem;
+    const faixa: Faixa = [r.top - origem, r.bottom - origem];
     const cs = getComputedStyle(el);
     const atomico = /^(IMG|SVG|CANVAS|TR|svg)$/.test(el.tagName);
     const evitar = cs.breakInside === "avoid" || cs.breakInside === "avoid-page" ||
       (cs as unknown as { pageBreakInside?: string }).pageBreakInside === "avoid";
-    // "Não partir" vale para blocos de até meia página (uma questão, uma caixa de
-    // resposta). Uma seção inteira marcada assim pularia de página e deixaria meio
-    // papel em branco: ela pode continuar na página seguinte, entre seus itens.
-    if (atomico && r.height < ALTURA_UTIL * 0.9) proibidos.push([t, b]);
-    else if (evitar && r.height <= ALTURA_UTIL * 0.5) proibidos.push([t, b]);
-    else if (r.height <= BLOCO_PEQUENO) proibidos.push([t, b]);
+    const borda = ["Top", "Right", "Bottom", "Left"].some((l) =>
+      parseFloat((cs as unknown as Record<string, string>)[`border${l}Width`]) > 0 &&
+      (cs as unknown as Record<string, string>)[`border${l}Style`] !== "none");
+    const decorada = borda || visivel(cs.backgroundColor) || cs.boxShadow !== "none" ||
+      cs.backgroundImage !== "none";
+
+    if ((atomico && r.height < ALTURA_UTIL * 0.9) || r.height <= BLOCO_PEQUENO) pecas.push(faixa);
+    // Caixa partida ao meio sai sem a borda de baixo numa página e sem a de cima na
+    // outra — parece folha quebrada. Só se parte a que não cabe numa página inteira.
+    else if ((decorada || evitar) && r.height < ALTURA_UTIL * 0.95) caixas.push(faixa);
+
     const antes = cs.breakBefore || (cs as unknown as { pageBreakBefore?: string }).pageBreakBefore;
     const depois = cs.breakAfter || (cs as unknown as { pageBreakAfter?: string }).pageBreakAfter;
-    if (antes === "page" || antes === "always") forcados.push(t);
-    if (depois === "page" || depois === "always") forcados.push(b);
+    if (antes === "page" || antes === "always") forcados.push(faixa[0]);
+    if (depois === "page" || depois === "always") forcados.push(faixa[1]);
   });
 
   const quebras = [...new Set(forcados.map(Math.round))]
     .filter((v) => v > 20 && v < total - 20)
     .sort((a, b) => a - b);
+
+  /** Sobe a partir do limite até um ponto livre das faixas; null se descer do piso. */
+  const procurar = (limite: number, piso: number, faixas: Faixa[]): number | null => {
+    let c = limite;
+    for (let i = 0; i < 2000; i++) {
+      const dentro = faixas.filter(([a, b]) => a < c - 0.5 && b > c + 0.5);
+      if (dentro.length === 0) return c >= piso ? c : null;
+      c = Math.min(...dentro.map(([a]) => a)) - 1;
+      if (c < piso) return null;
+    }
+    return null;
+  };
 
   const cortes = [0];
   let y = 0;
@@ -215,15 +319,13 @@ function calcularCortes(raiz: HTMLElement): number[] {
     if (forcado !== undefined) { cortes.push(forcado); y = forcado; continue; }
     if (limite >= total) break;
 
-    // Sobe a partir do limite até um ponto que não atravesse nada.
-    let c = limite;
-    for (let i = 0; i < 1000; i++) {
-      const dentro = proibidos.filter(([a, b]) => a < c - 0.5 && b > c + 0.5);
-      if (dentro.length === 0) break;
-      c = Math.min(...dentro.map(([a]) => a)) - 1;
-    }
-    // Sem ponto limpo razoável (um bloco gigante): corta no limite mesmo.
-    if (c < y + ALTURA_UTIL * 0.35) c = limite;
+    // Preferência: não partir caixa nenhuma, mesmo que sobre espaço no pé da página;
+    // depois, só não partir peças; por fim, só não partir linha de texto.
+    const c =
+      procurar(limite, y + ALTURA_UTIL * 0.2, [...linhas, ...pecas, ...caixas]) ??
+      procurar(limite, y + ALTURA_UTIL * 0.35, [...linhas, ...pecas]) ??
+      procurar(limite, y + ALTURA_UTIL * 0.2, linhas) ??
+      limite;
     cortes.push(Math.floor(c));
     y = Math.floor(c);
   }
@@ -270,6 +372,8 @@ export async function renderizarPaginas(folha: FolhaLivre): Promise<HTMLCanvasEl
     await esperarImagens(raiz);
     await new Promise((r) => setTimeout(r, 50));
 
+    garantirLinhasDeResposta(raiz);
+    ajustarRespiro(raiz);
     const cortes = calcularCortes(raiz);
     const total = cortes[cortes.length - 1];
     // O canvas tem limite de altura no navegador; folhas muito longas caem para escala 1.
