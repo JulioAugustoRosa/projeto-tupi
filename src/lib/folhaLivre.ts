@@ -166,6 +166,23 @@ function montarElemento(p: HtmlPreparado): HTMLDivElement {
  * pai não é flex, e a linha do NOME some. Elemento vazio, com borda embaixo e quase
  * sem largura, ganha largura mínima — numa folha, linha de resposta é essencial.
  */
+/**
+ * O modelo às vezes imita a folha de papel com uma caixa de altura fixa ou mínima do
+ * tamanho de uma A4 (min-height: 1123px). Como a área útil aqui é menor (as margens
+ * são da paginação), essa caixa sempre transborda e empurra o fim da página para uma
+ * folha quase vazia. Altura desse porte só existe para imitar página: é liberada.
+ */
+function liberarAlturaDePagina(raiz: HTMLElement) {
+  const limite = ALTURA_UTIL * 0.8;
+  raiz.querySelectorAll<HTMLElement>("*").forEach((el) => {
+    const cs = getComputedStyle(el);
+    if (parseFloat(cs.minHeight) >= limite) el.style.minHeight = "0";
+    if (/px$/.test(cs.height) && parseFloat(cs.height) >= limite && el.scrollHeight <= parseFloat(cs.height)) {
+      el.style.height = "auto";
+    }
+  });
+}
+
 function garantirLinhasDeResposta(raiz: HTMLElement) {
   raiz.querySelectorAll<HTMLElement>("*").forEach((el) => {
     if (el.children.length > 0 || el.textContent?.trim() || /^(IMG|SVG|BR|HR|svg)$/.test(el.tagName)) return;
@@ -241,6 +258,23 @@ function ajustarRespiro(raiz: HTMLElement) {
  * Devolve as fronteiras das páginas, em px a partir do topo da folha:
  * [0, corte1, corte2, ..., alturaTotal].
  */
+/**
+ * Título de verdade (h1–h6), ou linha curta toda em negrito com cara de enunciado:
+ * numerada ("4. VEJA UM MODELO", "B) QUANDO ACONTECEU?") ou terminada em "?" ou ":".
+ * Uma lista de palavras em negrito não é título: é conteúdo.
+ */
+function ehTitulo(el: HTMLElement, cs: CSSStyleDeclaration, altura: number): boolean {
+  if (/^H[1-6]$/.test(el.tagName)) return true;
+  if (!/^(block|list-item|flex)$/.test(cs.display)) return false;
+  const texto = el.textContent?.trim() ?? "";
+  if (!texto || texto.length > 120 || el.querySelector("img, svg, table, ul, ol, div, p")) return false;
+  const linha = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.3;
+  if (altura > linha * 2.2) return false;
+  const negrito = Number(cs.fontWeight) >= 600 ||
+    el.querySelector("strong, b")?.textContent?.trim() === texto;
+  return negrito && (/^(\d{1,2}|[A-Za-z])\s*[.)\-–]\s/.test(texto) || /[?:]$/.test(texto));
+}
+
 function calcularCortes(raiz: HTMLElement): number[] {
   const origem = raiz.getBoundingClientRect().top;
   const total = Math.ceil(raiz.scrollHeight);
@@ -249,6 +283,7 @@ function calcularCortes(raiz: HTMLElement): number[] {
   const linhas: Faixa[] = [];      // linha de texto: nunca
   const pecas: Faixa[] = [];       // imagem, linha de tabela, bloco pequeno
   const caixas: Faixa[] = [];      // caixa com borda, fundo ou sombra; bloco "não partir"
+  const titulos: Faixa[] = [];     // título ou enunciado curto em negrito: vai com o que vem depois
   const forcados: number[] = [];
 
   const range = document.createRange();
@@ -284,6 +319,8 @@ function calcularCortes(raiz: HTMLElement): number[] {
     const decorada = borda || visivel(cs.backgroundColor) || cs.boxShadow !== "none" ||
       cs.backgroundImage !== "none";
 
+    if (ehTitulo(el, cs, r.height)) titulos.push(faixa);
+
     if ((atomico && r.height < ALTURA_UTIL * 0.9) || r.height <= BLOCO_PEQUENO) pecas.push(faixa);
     // Caixa partida ao meio sai sem a borda de baixo numa página e sem a de cima na
     // outra — parece folha quebrada. Só se parte a que não cabe numa página inteira.
@@ -311,13 +348,33 @@ function calcularCortes(raiz: HTMLElement): number[] {
     return null;
   };
 
+  /**
+   * Título no pé da página, com o conteúdo dele na página seguinte, parece folha
+   * quebrada. Se depois do título só sobraram até duas linhas antes do corte, o corte
+   * sobe para antes do título e ele desce junto com o que apresenta.
+   */
+  const segurarTitulo = (c: number, piso: number): number => {
+    const orfaos = titulos.filter(([a, b]) => {
+      if (b > c + 0.5 || a < piso) return false;
+      const depois = linhas.filter(([la, lb]) => la >= b - 1 && lb <= c + 0.5).length;
+      return depois <= 2;
+    });
+    if (orfaos.length === 0) return c;
+    const alvo = Math.min(...orfaos.map(([a]) => a)) - 1;
+    return procurar(alvo, piso, [...linhas, ...pecas, ...caixas]) ??
+      procurar(alvo, piso, linhas) ?? c;
+  };
+
+  // Onde o conteúdo acaba: espaço em branco depois disso não abre página nova.
+  const fimConteudo = Math.max(0, ...[...linhas, ...pecas, ...caixas].map(([, b]) => b));
+
   const cortes = [0];
   let y = 0;
   for (let guarda = 0; guarda < 200; guarda++) {
     const limite = y + ALTURA_UTIL;
     const forcado = quebras.find((v) => v > y + 20 && v <= Math.min(limite, total));
     if (forcado !== undefined) { cortes.push(forcado); y = forcado; continue; }
-    if (limite >= total) break;
+    if (limite >= Math.min(total, fimConteudo + 1)) break;
 
     // Preferência: não partir caixa nenhuma, mesmo que sobre espaço no pé da página;
     // depois, só não partir peças; por fim, só não partir linha de texto.
@@ -326,8 +383,9 @@ function calcularCortes(raiz: HTMLElement): number[] {
       procurar(limite, y + ALTURA_UTIL * 0.35, [...linhas, ...pecas]) ??
       procurar(limite, y + ALTURA_UTIL * 0.2, linhas) ??
       limite;
-    cortes.push(Math.floor(c));
-    y = Math.floor(c);
+    const final = segurarTitulo(c, y + ALTURA_UTIL * 0.35);
+    cortes.push(Math.floor(final));
+    y = Math.floor(final);
   }
   cortes.push(total);
   return cortes;
@@ -372,6 +430,7 @@ export async function renderizarPaginas(folha: FolhaLivre): Promise<HTMLCanvasEl
     await esperarImagens(raiz);
     await new Promise((r) => setTimeout(r, 50));
 
+    liberarAlturaDePagina(raiz);
     garantirLinhasDeResposta(raiz);
     ajustarRespiro(raiz);
     const cortes = calcularCortes(raiz);

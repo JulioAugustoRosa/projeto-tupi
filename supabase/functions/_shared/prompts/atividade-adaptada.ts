@@ -236,6 +236,16 @@ comum. Use-as como medida e como tom, não como formato obrigatório:
 Se o professor exigiu preservar o texto original, o texto dele fica como está: a
 concisão vale para o que VOCÊ escreve — enunciados, exemplos e apoios.`;
 
+const MENOS_TEXTO = `==================================================
+O MAIS IMPORTANTE: MENOS TEXTO E BANCO DE PALAVRAS
+==================================================
+
+- Escreva o MÍNIMO de texto. Corte toda frase que o estudante não precisa para fazer
+  a atividade. Na dúvida, corte.
+- Toda questão em que o estudante escreve ou completa traz um BANCO DE PALAVRAS.
+- Se o professor exigiu preservar o texto original, esse texto fica como está; o
+  corte vale para o resto.`;
+
 const MARCACAO_IMAGEM = `==================================================
 COMO MARCAR AS IMAGENS
 ==================================================
@@ -474,6 +484,7 @@ ${professor.instrucoes.trim() || "Nenhuma instrução adicional."}
 
 ${blocoMaterial(sol.tem_material_anexado)}`,
     SEGURANCA,
+    MENOS_TEXTO,
     FORMATO,
   ];
 

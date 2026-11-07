@@ -45,75 +45,30 @@ const json = (b: unknown, s: number, o: string | null) =>
 
 
 // ---------------------------------------------------------------------------
-// Prompt — curto de propósito. Só há regra técnica; o visual é do modelo.
-// ---------------------------------------------------------------------------
+// Prompt mínimo de propósito: cada parâmetro a mais vira mais um jeito de o
+// documento sair quebrado. Só vão o conteúdo, o aluno, as regras de texto e o
+// formato técnico que o sistema precisa para paginar e pôr as imagens.
 function montarPrompt(ctx: string, conteudo: string, temMaterial: boolean) {
-  const sobreMaterial = temMaterial
-    ? `
-O professor anexou o material original (a imagem que acompanha esta mensagem). Ele será
-impresso na folha: coloque <img data-material alt="material da atividade"> onde ele deve
-aparecer e escreva os enunciados apontando para ele. Não transcreva o material inteiro.
-`
+  const material = temMaterial
+    ? `\nO material anexado será impresso na folha: ponha <img data-material alt=""> onde ele deve aparecer.\n`
     : "";
 
-  return `Você é um professor especialista em educação inclusiva e um ótimo designer de
-materiais didáticos. Monte a folha de atividade deste estudante, pronta para imprimir e
-entregar a ele.
-
-Você tem liberdade para escolher o layout, a organização, as cores, a tipografia, o
-espaçamento e quantas páginas forem necessárias. Faça a melhor folha que você faria
-para este estudante, considerando o perfil abaixo.
-
-COMO COSTUMAM SER AS FOLHAS QUE FUNCIONAM — REFERÊNCIA, NÃO MOLDE
-As folhas que professoras aprovaram para estudantes como este são sóbrias e respiram:
-- cabeçalho discreto (disciplina • ano), título, e uma linha de NOME e DATA;
-- partes numeradas, cada uma com um subtítulo colorido e o texto em preto, em letra
-  grande e com bastante espaço entre as linhas;
-- poucas caixas: um fundo claro para destacar o exemplo ou o banco de palavras, e o
-  resto direto na página, sem moldura em volta de tudo;
-- uma ilustração larga do tema logo depois da situação; outras só se ajudarem a entender;
-- páginas planejadas: em geral a primeira é para ler e entender, e a segunda para
-  praticar e produzir ("AGORA É SUA VEZ!"), repetindo o cabeçalho e a linha de NOME;
-- espaço em branco no pé da página é normal. Folha apertada não é.
-
-TAMANHO DA PÁGINA — ESTIME ANTES DE FECHAR CADA UMA
-Cada página tem cerca de 1.050px de altura útil. Para ter noção, em linhas: com letra
-de 14px e espaçamento confortável, cabem umas 35 linhas — planeje para 30, deixando
-folga, porque a conta nunca é exata. A ilustração larga
-ocupa o lugar de umas 12 linhas; o cabeçalho com título e NOME, umas 5; cada subtítulo
-de parte, umas 2; cada linha de resposta, umas 2. Some o que pôs em cada página.
-Uma página que transborda parece folha quebrada: o excedente vai sozinho para uma
-página quase vazia. Se a conta não fecha, planeje uma página a mais (break-before: page
-antes da parte que não cabe) — três páginas bem resolvidas são melhores que duas
-estourando. E nunca deixe uma parte começar no pé de uma página e terminar na outra.
+  return `Crie a folha de atividade deste estudante, pronta para imprimir.
 
 ${ctx}
 
-A ATIVIDADE — este é o conteúdo da folha:
+ATIVIDADE:
 ${conteudo}
 
-Esse conteúdo já foi definido com o professor: mantenha as palavras, os textos, os números,
-os nomes e as perguntas. Como apresentar é decisão sua. Se aparecerem marcadores entre
-colchetes, como [DIA] ou [NOME DO LOCAL], troque cada um por uma linha para o estudante
-preencher — colchete não é algo que ele saiba completar.
-${sobreMaterial}
-FORMATO DA RESPOSTA — são exigências técnicas, não estéticas:
-- Responda apenas com um documento HTML completo, de <!DOCTYPE html> a </html>, com o CSS
-  dentro de <style>. Sem markdown, sem cercas de código, sem comentário antes ou depois.
-- A página tem 794px de largura (A4 a 96 dpi). Não use vw, vh nem position: fixed, e não
-  fixe a altura das páginas: o sistema divide o documento em folhas A4 sozinho, sem
-  encolher nada. Para começar uma página nova num ponto exato, use style="break-before: page".
-  Use break-inside: avoid nos blocos que não podem ser partidos entre duas páginas.
-- A folha é capturada como tela: não dependa de @media print.
-- Sem JavaScript, sem links externos e sem fontes da internet. Fontes disponíveis:
-  Arial, Verdana, Tahoma, Trebuchet MS, Georgia, Inter e Outfit.
-- Sem <input>, <textarea> ou outros campos de formulário: a folha é de papel. Para o aluno
-  escrever, desenhe linhas ou caixas com CSS.
-- Ilustrações: você não desenha nem busca imagens. Onde quiser uma, escreva
-  <img data-ilustracao="descrição em português, de 15 a 25 palavras, do objeto ou da cena" alt="...">
-  e o sistema gera a imagem nesse lugar. Cada marcação [IMAGEM: ...] da atividade vira uma
-  dessas, no mesmo ponto. No máximo ${MAX_IMAGENS} na folha inteira. Defina o tamanho de cada
-  uma pelo CSS. Nunca peça figura com letras, palavras ou texto escrito dentro.`;
+REGRAS:
+- POUCO TEXTO. Frases curtas, uma ideia por linha. Corte o que o estudante não precisa para fazer a atividade.
+- BANCO DE PALAVRAS em toda questão em que o estudante escreve ou completa.
+- CAIXA ALTA em tudo o que o estudante vai ler.
+${material}
+Responda só com um documento HTML completo (de <!DOCTYPE html> a </html>), com o CSS em <style>,
+largura de 794px, sem JavaScript e sem nada externo. Cada página tem 1.050px de altura
+útil: não dê altura às páginas e, para começar uma nova, use style="break-before: page". Para uma ilustração, escreva
+<img data-ilustracao="descrição do desenho, sem texto dentro" alt=""> (no máximo ${MAX_IMAGENS}).`;
 }
 
 // ---------------------------------------------------------------------------
