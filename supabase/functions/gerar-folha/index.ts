@@ -13,6 +13,7 @@
 //   - a paginação em A4, feita no navegador, sem encolher nada.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { corrigirCaixaMista } from "../_shared/texto.ts";
 
 const MODELO = "openai/gpt-6-luna";
 // Raciocínio é opcional nesta família, mas o padrão é "medium". Fixado em "low"
@@ -48,7 +49,20 @@ const json = (b: unknown, s: number, o: string | null) =>
 // Prompt mínimo de propósito: cada parâmetro a mais vira mais um jeito de o
 // documento sair quebrado. Só vão o conteúdo, o aluno, as regras de texto e o
 // formato técnico que o sistema precisa para paginar e pôr as imagens.
-function montarPrompt(ctx: string, conteudo: string, temMaterial: boolean) {
+function montarPrompt(
+  ctx: string, conteudo: string, temMaterial: boolean, paginas?: number, obtidas?: number,
+) {
+  // Cada página comporta umas 30 linhas de texto em letra de 18px a 20px: é a única
+  // medida que o modelo precisa para respeitar o número de páginas sem estourar.
+  const tamanho = paginas
+    ? `- A folha tem exatamente ${paginas} ${paginas === 1 ? "página" : "páginas"}, de umas 30 linhas de texto cada. ` +
+      "Se não couber, enxugue o texto; a letra do texto fica em 18px ou mais." +
+      (obtidas && obtidas > paginas
+        ? ` Uma versão anterior desta folha ficou com ${obtidas} páginas: desta vez, enxugue o texto e os espaços ` +
+          `até caber em ${paginas}, sem diminuir a letra.`
+        : "")
+    : "- Defina quantas páginas a folha terá conforme o conteúdo, a complexidade e as necessidades do estudante. " +
+      "Só comece uma página nova quando a anterior estiver cheia.";
   const material = temMaterial
     ? `\nO material anexado será impresso na folha: ponha <img data-material alt=""> onde ele deve aparecer.\n`
     : "";
@@ -64,6 +78,7 @@ REGRAS:
 - POUCO TEXTO. Frases curtas, uma ideia por linha. Corte o que o estudante não precisa para fazer a atividade.
 - BANCO DE PALAVRAS em toda questão em que o estudante escreve ou completa.
 - CAIXA ALTA em tudo o que o estudante vai ler.
+${tamanho}
 ${material}
 Responda só com um documento HTML completo (de <!DOCTYPE html> a </html>), com o CSS em <style>,
 largura de 794px, sem JavaScript e sem nada externo. Cada página tem 1.050px de altura
@@ -202,13 +217,20 @@ serve(async (req) => {
 
     const body = await req.json().catch(() => null);
     if (!body) return json({ error: "Corpo inválido" }, 400, origin);
-    const { aluno_id, conteudo, com_imagens, anexos } = body as {
-      aluno_id?: string; conteudo?: string; com_imagens?: boolean;
+    const { aluno_id, conteudo, com_imagens, anexos, paginas, paginas_obtidas, reaproveitar_imagens } = body as {
+      aluno_id?: string; conteudo?: string; com_imagens?: boolean; paginas?: number;
+      /** Nova tentativa: quantas páginas saíram na versão anterior. */
+      paginas_obtidas?: number;
+      /** Nova tentativa: não gera ilustrações e deixa as marcações para o navegador
+       *  pôr as da versão anterior. Assim a segunda tentativa não paga imagem de novo. */
+      reaproveitar_imagens?: boolean;
       anexos?: { nome?: string; mime?: string; data?: string }[];
     };
 
     if (!aluno_id) return json({ error: "Selecione um aluno." }, 400, origin);
     const texto = (conteudo ?? "").trim();
+    const nPag = Number(paginas);
+    const qtdPaginas = Number.isFinite(nPag) && nPag > 0 && nPag <= 10 ? Math.floor(nPag) : undefined;
     if (!texto) return json({ error: "Falta o conteúdo da atividade." }, 400, origin);
     if (texto.length > MAX_CONTEUDO) return json({ error: "Conteúdo longo demais." }, 413, origin);
 
@@ -274,7 +296,7 @@ serve(async (req) => {
     // Ilustrações já marcadas na atividade ficam no texto: o modelo as converte
     // em <img data-ilustracao> no ponto em que fizer sentido no layout dele.
     const partesUsuario: unknown[] = [
-      { type: "text", text: montarPrompt(ctx, texto, listaAnexos.length > 0) },
+      { type: "text", text: montarPrompt(ctx, texto, listaAnexos.length > 0, qtdPaginas, Number(paginas_obtidas) || undefined) },
     ];
     for (const a of listaAnexos) {
       const dataUrl = `data:${a.mime};base64,${a.data}`;
@@ -337,7 +359,8 @@ serve(async (req) => {
           return parte;
         }
         if (emStyle) return parte;
-        return parte.replace(
+        // A folha é em caixa alta: palavra com a caixa misturada é erro do modelo.
+        return corrigirCaixaMista(parte).replace(
           /\[\s*(?:IMAGEM|IMAGE|FIGURA|DESENHO)\s*:\s*([^\]]+)\]/gi,
           (_m, d: string) => `<img data-ilustracao="${escAttr(d.trim())}" alt="" style="max-width:220px;display:block;margin:8px auto;">`,
         );
@@ -348,7 +371,7 @@ serve(async (req) => {
     const tags = [...html.matchAll(/<img\b[^>]*\bdata-ilustracao\s*=\s*("([^"]*)"|'([^']*)')[^>]*>/gi)];
     const alvos = tags.slice(0, MAX_IMAGENS);
     let aviso_imagens: string | undefined;
-    if (alvos.length > 0 && com_imagens !== false) {
+    if (alvos.length > 0 && com_imagens !== false && reaproveitar_imagens !== true) {
       const imagens = await Promise.all(alvos.map((m) => {
         const desc = (m[2] ?? m[3] ?? "").trim().slice(0, 300);
         return desc ? baixarIlustracao(`${desc}, ${ESTILO_ILUSTRACAO}`, apiKey) : Promise.resolve(null);
@@ -359,7 +382,7 @@ serve(async (req) => {
         const ini = m.index!;
         const fim = ini + m[0].length;
         const novo = imagens[i]
-          ? m[0].replace(/\bdata-ilustracao\s*=\s*("[^"]*"|'[^']*')/i, `src="${imagens[i]}"`)
+          ? m[0].replace(/\bdata-ilustracao\s*=\s*("[^"]*"|'[^']*')/i, `src="${imagens[i]}" data-ilustrada=""`)
           : "";
         html = html.slice(0, ini) + novo + html.slice(fim);
       }
@@ -370,8 +393,11 @@ serve(async (req) => {
           : `Só ${obtidas} de ${alvos.length} ilustrações foram geradas. Tente novamente em alguns instantes.`;
       }
     }
-    // Marcações além do teto, ou com imagens desligadas, saem da folha.
-    html = html.replace(/<img\b[^>]*\bdata-ilustracao\b[^>]*>/gi, "");
+    // Marcações além do teto, ou com imagens desligadas, saem da folha. Na nova
+    // tentativa elas ficam: o navegador põe nelas as ilustrações da versão anterior.
+    if (reaproveitar_imagens !== true) {
+      html = html.replace(/<img\b[^>]*\bdata-ilustracao\b[^>]*>/gi, "");
+    }
 
     // -------- Material anexado --------
     // Embutido pelo servidor, exatamente como o professor enviou.

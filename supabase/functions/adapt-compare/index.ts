@@ -10,6 +10,7 @@ import {
   type PedidoProfessor,
   verificarAtividade,
 } from "../_shared/prompts/atividade-adaptada.ts";
+import { corrigirCaixaMista } from "../_shared/texto.ts";
 
 // ---------------------------------------------------------------------------
 // Configuração
@@ -194,7 +195,7 @@ serve(async (req) => {
 
     const {
       aluno_id, texto, instrucoes, arquivos, modelos,
-      preservar_texto_original, quantidade_questoes, formato_preferido,
+      preservar_texto_original, quantidade_questoes, quantidade_paginas, formato_preferido,
       caixa_alta, imagens,
     } = body as {
       aluno_id?: string; texto?: string; instrucoes?: string;
@@ -202,6 +203,7 @@ serve(async (req) => {
       modelos?: string[];
       preservar_texto_original?: boolean;
       quantidade_questoes?: number;
+      quantidade_paginas?: number;
       formato_preferido?: string;
       caixa_alta?: boolean;
       imagens?: boolean;
@@ -213,11 +215,15 @@ serve(async (req) => {
 
     // Opções do professor, saneadas. Elas têm prioridade sobre o prompt.
     const qtd = Number(quantidade_questoes);
+    const pags = Number(quantidade_paginas);
     const pedido: PedidoProfessor = {
       instrucoes: (instrucoes ?? "").trim(),
       preservar_texto_original: preservar_texto_original === true,
       quantidade_questoes: Number.isFinite(qtd) && qtd > 0 && qtd <= 20
         ? Math.floor(qtd)
+        : undefined,
+      quantidade_paginas: Number.isFinite(pags) && pags > 0 && pags <= 10
+        ? Math.floor(pags)
         : undefined,
       formato_preferido: typeof formato_preferido === "string"
         ? formato_preferido.trim().slice(0, 200) || undefined
@@ -388,6 +394,14 @@ serve(async (req) => {
       tem_material_anexado: listaArquivos.length > 0,
     });
 
+    /** Com caixa alta pedida, corrige palavra de caixa misturada só na parte do aluno. */
+    const caixaAltaNaAtividade = (c: string) => {
+      const ini = c.indexOf(MARCA_INICIO);
+      const fim = c.indexOf(MARCA_FIM);
+      if (ini < 0 || fim <= ini) return c;
+      return c.slice(0, ini) + corrigirCaixaMista(c.slice(ini, fim)) + c.slice(fim);
+    };
+
     // ---- 6. Chama os modelos em paralelo --------------------------------
     const resultados = await Promise.all(
       modelosValidos.map((m) => chamarModelo(m, systemPrompt, partes, apiKey)),
@@ -397,6 +411,7 @@ serve(async (req) => {
     // gastar outra chamada no router. Não corrige nada — o professor decide.
     const comVerificacao = resultados.map((r) => {
       if (!r.conteudo) return r;
+      if (pedido.caixa_alta) r = { ...r, conteudo: caixaAltaNaAtividade(r.conteudo) };
       const ini = r.conteudo.indexOf(MARCA_INICIO);
       const fim = r.conteudo.indexOf(MARCA_FIM);
       const atividade = ini >= 0 && fim > ini

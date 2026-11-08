@@ -31,7 +31,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  folhaParaHtml, paginasParaDocx, paginasParaPdf, renderizarPaginas, type FolhaLivre,
+  medirFolha, folhaParaHtml, paginasParaDocx, paginasParaPdf, reaproveitarIlustracoes,
+  renderizarPaginas, type FolhaLivre,
 } from "@/lib/folhaLivre";
 import {
   Select,
@@ -55,6 +56,7 @@ interface ResultadoModelo {
 interface OpcoesProfessor {
   preservar_texto_original: boolean;
   quantidade_questoes: string;
+  quantidade_paginas: string;
   caixa_alta: boolean;
   imagens: boolean;
   formato_preferido: string;
@@ -63,6 +65,7 @@ interface OpcoesProfessor {
 const OPCOES_PADRAO: OpcoesProfessor = {
   preservar_texto_original: false,
   quantidade_questoes: "",
+  quantidade_paginas: "",
   caixa_alta: false,
   imagens: true,
   formato_preferido: "",
@@ -80,6 +83,8 @@ interface Message {
   anexos?: { nome: string; mime: string; data: string }[];
   /** material salvo no storage, para a folha ainda funcionar após recarregar */
   material?: { nome: string; mime: string; path: string } | null;
+  /** número de páginas escolhido pelo professor; vazio = a IA decide */
+  paginas?: number;
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
@@ -256,6 +261,7 @@ const AssistentePage = () => {
           base.alunoNome = meta.aluno;
           base.alunoId = meta.aluno_id;
           base.material = meta.material ?? null;
+          base.paginas = typeof meta.paginas === "number" ? meta.paginas : undefined;
           base.content = `Adaptação para **${meta.aluno}** — ${meta.resultados.length} modelo(s).`;
         }
         return base;
@@ -377,6 +383,9 @@ const AssistentePage = () => {
         conversation_id: convId, role: "user", content: userMsg.content,
       });
 
+      // Guardado com a mensagem: a folha desta adaptação respeita o que foi pedido aqui.
+      const nPag = Math.floor(Number(opcoes.quantidade_paginas));
+      const paginasPedidas = nPag >= 1 && nPag <= 10 ? nPag : undefined;
       const { data: sessionData } = await supabase.auth.getSession();
       const resp = await fetch(COMPARE_URL, {
         method: "POST",
@@ -392,6 +401,7 @@ const AssistentePage = () => {
           modelos: modelosSel,
           preservar_texto_original: opcoes.preservar_texto_original,
           quantidade_questoes: Number(opcoes.quantidade_questoes) || undefined,
+          quantidade_paginas: paginasPedidas,
           caixa_alta: opcoes.caixa_alta,
           imagens: opcoes.imagens,
           formato_preferido: opcoes.formato_preferido.trim() || undefined,
@@ -435,6 +445,7 @@ const AssistentePage = () => {
         alunoId,
         anexos: arquivos,
         material,
+        paginas: paginasPedidas,
       };
       setMessages((prev) => [...prev, compMsg]);
 
@@ -457,6 +468,7 @@ const AssistentePage = () => {
           aluno_id: alunoId,
           resultados,
           material,
+          paginas: paginasPedidas ?? null,
         } as unknown as Json,
       });
       await supabase.from("chat_conversations")
@@ -850,11 +862,43 @@ const AssistentePage = () => {
     }
   };
 
-  /** Chama a edge function e devolve a folha montada. */
+  /**
+   * Pede a folha. Se o professor fixou o número de páginas e ela saiu maior, pede
+   * uma vez mais, dizendo quantas páginas saíram, e reaproveita as ilustrações já
+   * geradas. Fica a versão com menos páginas.
+   */
   const pedirFolha = async (
     alunoDaFolha: string,
     conteudo: string,
     msg?: Message,
+  ): Promise<FolhaLivre> => {
+    const primeira = await chamarFolha(alunoDaFolha, conteudo, msg);
+    const alvo = msg?.paginas;
+    if (!alvo) return primeira;
+    try {
+      const antes = await medirFolha(primeira);
+      if (antes.paginas <= alvo) return primeira;
+      const bruta = await chamarFolha(alunoDaFolha, conteudo, msg, {
+        paginas_obtidas: antes.paginas,
+        reaproveitar_imagens: true,
+      });
+      const segunda = reaproveitarIlustracoes(primeira, bruta);
+      const depois = await medirFolha(segunda);
+      // Caber diminuindo a letra não vale: o combinado é não encolher nada.
+      const melhorou = depois.paginas < antes.paginas && depois.letra >= antes.letra - 0.5;
+      return melhorou ? segunda : primeira;
+    } catch (e) {
+      console.warn("nova tentativa de ajustar as páginas falhou:", (e as Error).message);
+      return primeira;
+    }
+  };
+
+  /** Chama a edge function e devolve a folha montada. */
+  const chamarFolha = async (
+    alunoDaFolha: string,
+    conteudo: string,
+    msg?: Message,
+    ajuste?: { paginas_obtidas: number; reaproveitar_imagens: boolean },
   ): Promise<FolhaLivre> => {
     // Na sessão o anexo está em memória; depois de recarregar, vem do storage.
     let anexos = msg?.anexos;
@@ -870,7 +914,11 @@ const AssistentePage = () => {
         Authorization: `Bearer ${sessionData?.session?.access_token}`,
         apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
       },
-      body: JSON.stringify({ aluno_id: alunoDaFolha, conteudo, com_imagens: true, anexos: anexos ?? [] }),
+      body: JSON.stringify({
+        aluno_id: alunoDaFolha, conteudo, com_imagens: true, anexos: anexos ?? [],
+        paginas: msg?.paginas,
+        ...ajuste,
+      }),
     });
     const result = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(result.error || `Erro ${resp.status}`);
@@ -887,6 +935,7 @@ const AssistentePage = () => {
     opcoes.caixa_alta,
     !opcoes.imagens,
     Boolean(opcoes.quantidade_questoes.trim()),
+    Boolean(opcoes.quantidade_paginas.trim()),
     Boolean(opcoes.formato_preferido.trim()),
   ].filter(Boolean).length;
 
@@ -1610,6 +1659,21 @@ const AssistentePage = () => {
                       value={opcoes.quantidade_questoes}
                       onChange={(e) =>
                         setOpcoes((o) => ({ ...o, quantidade_questoes: e.target.value }))}
+                      className="h-8"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="opt-paginas" className="text-sm">Número de páginas</Label>
+                    <Input
+                      id="opt-paginas"
+                      type="number"
+                      min={1}
+                      max={10}
+                      placeholder="a IA decide"
+                      value={opcoes.quantidade_paginas}
+                      onChange={(e) =>
+                        setOpcoes((o) => ({ ...o, quantidade_paginas: e.target.value }))}
                       className="h-8"
                     />
                   </div>

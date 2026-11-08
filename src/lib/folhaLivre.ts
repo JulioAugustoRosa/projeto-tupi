@@ -259,6 +259,24 @@ function ajustarRespiro(raiz: HTMLElement) {
  * [0, corte1, corte2, ..., alturaTotal].
  */
 /**
+ * O modelo às vezes reserva uma página para cada parte, e uma parte curta fica sozinha
+ * numa folha quase vazia. Uma página planejada com menos de um terço ocupado se junta
+ * à seguinte quando as duas cabem numa só. Nada muda de tamanho: só some a quebra.
+ */
+function juntarPaginasVazias(quebras: number[], total: number): number[] {
+  const marcos = [0, ...quebras, total];
+  for (let i = 1; i < marcos.length - 1; i++) {
+    const curta = marcos[i] - marcos[i - 1] < ALTURA_UTIL / 3 ||
+      marcos[i + 1] - marcos[i] < ALTURA_UTIL / 3;
+    if (curta && marcos[i + 1] - marcos[i - 1] <= ALTURA_UTIL) {
+      marcos.splice(i, 1);
+      i--;
+    }
+  }
+  return marcos.slice(1, -1);
+}
+
+/**
  * Título de verdade (h1–h6), ou linha curta toda em negrito com cara de enunciado:
  * numerada ("4. VEJA UM MODELO", "B) QUANDO ACONTECEU?") ou terminada em "?" ou ":".
  * Uma lista de palavras em negrito não é título: é conteúdo.
@@ -332,9 +350,12 @@ function calcularCortes(raiz: HTMLElement): number[] {
     if (depois === "page" || depois === "always") forcados.push(faixa[1]);
   });
 
-  const quebras = [...new Set(forcados.map(Math.round))]
-    .filter((v) => v > 20 && v < total - 20)
-    .sort((a, b) => a - b);
+  const quebras = juntarPaginasVazias(
+    [...new Set(forcados.map(Math.round))]
+      .filter((v) => v > 20 && v < total - 20)
+      .sort((a, b) => a - b),
+    total,
+  );
 
   /** Sobe a partir do limite até um ponto livre das faixas; null se descer do piso. */
   const procurar = (limite: number, piso: number, faixas: Faixa[]): number | null => {
@@ -418,7 +439,14 @@ async function esperarImagens(raiz: HTMLElement) {
 }
 
 /** Renderiza a folha inteira em páginas A4, cada uma num canvas no tamanho real. */
-export async function renderizarPaginas(folha: FolhaLivre): Promise<HTMLCanvasElement[]> {
+/**
+ * Monta a folha fora da tela, aplica os ajustes de paginação e entrega os cortes.
+ * É a mesma diagramação para contar e para desenhar: a contagem nunca diverge do PDF.
+ */
+async function diagramar<T>(
+  folha: FolhaLivre,
+  usar: (raiz: HTMLElement, cortes: number[]) => Promise<T>,
+): Promise<T> {
   corrigirMedicaoDeFonte();
   const preparado = prepararHtml(folha.html);
   const host = document.createElement("div");
@@ -429,11 +457,38 @@ export async function renderizarPaginas(folha: FolhaLivre): Promise<HTMLCanvasEl
   try {
     await esperarImagens(raiz);
     await new Promise((r) => setTimeout(r, 50));
-
     liberarAlturaDePagina(raiz);
     garantirLinhasDeResposta(raiz);
     ajustarRespiro(raiz);
-    const cortes = calcularCortes(raiz);
+    return await usar(raiz, calcularCortes(raiz));
+  } finally {
+    document.body.removeChild(host);
+  }
+}
+
+/**
+ * Mede a folha sem desenhar nada: quantas páginas A4 ela vai ter e o tamanho da letra
+ * do texto corrido (a mediana, ponderada pela quantidade de texto em cada tamanho).
+ */
+export function medirFolha(folha: FolhaLivre): Promise<{ paginas: number; letra: number }> {
+  return diagramar(folha, async (raiz, cortes) => {
+    const tamanhos: [number, number][] = [];
+    const walker = document.createTreeWalker(raiz, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const qtd = n.textContent?.trim().length ?? 0;
+      if (!qtd || !n.parentElement || n.parentElement.tagName === "STYLE") continue;
+      tamanhos.push([parseFloat(getComputedStyle(n.parentElement).fontSize) || 0, qtd]);
+    }
+    tamanhos.sort((a, b) => a[0] - b[0]);
+    const metade = tamanhos.reduce((s, [, q]) => s + q, 0) / 2;
+    let acc = 0;
+    const letra = tamanhos.find(([, q]) => (acc += q) >= metade)?.[0] ?? 0;
+    return { paginas: cortes.slice(1).filter((fim, i) => fim - cortes[i] >= 2).length, letra };
+  });
+}
+
+export function renderizarPaginas(folha: FolhaLivre): Promise<HTMLCanvasElement[]> {
+  return diagramar(folha, async (raiz, cortes) => {
     const total = cortes[cortes.length - 1];
     // O canvas tem limite de altura no navegador; folhas muito longas caem para escala 1.
     const escala = Math.min(2, 30000 / Math.max(total, 1));
@@ -463,9 +518,32 @@ export async function renderizarPaginas(folha: FolhaLivre): Promise<HTMLCanvasEl
       paginas.push(pag);
     }
     return paginas;
-  } finally {
-    document.body.removeChild(host);
-  }
+  });
+}
+
+/**
+ * Põe na folha nova as ilustrações já geradas na anterior, na mesma ordem. Marcação
+ * que sobrar sai da folha. Serve para a segunda tentativa não pagar imagem de novo.
+ */
+export function reaproveitarIlustracoes(de: FolhaLivre, para: FolhaLivre): FolhaLivre {
+  const fontes = Array.from(
+    new DOMParser().parseFromString(de.html, "text/html").querySelectorAll("img[data-ilustrada]"),
+  ).map((img) => img.getAttribute("src") ?? "");
+  const doc = new DOMParser().parseFromString(para.html, "text/html");
+  doc.querySelectorAll("img[data-ilustracao]").forEach((img, i) => {
+    if (fontes[i]) {
+      img.setAttribute("src", fontes[i]);
+      img.removeAttribute("data-ilustracao");
+      img.setAttribute("data-ilustrada", "");
+    } else {
+      img.remove();
+    }
+  });
+  return {
+    ...para,
+    html: `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`,
+    aviso_imagens: de.aviso_imagens,
+  };
 }
 
 // ---------------------------------------------------------------------------

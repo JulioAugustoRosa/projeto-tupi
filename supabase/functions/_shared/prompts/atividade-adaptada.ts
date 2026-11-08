@@ -20,6 +20,8 @@ export interface PedidoProfessor {
   instrucoes: string;
   /** Quantas questões a atividade deve ter. Verificado por código depois da geração. */
   quantidade_questoes?: number;
+  /** Número de páginas da folha final. Sem valor, a IA decide pelo conteúdo e pelo perfil. */
+  quantidade_paginas?: number;
   /** Ex.: "duas páginas", "só frente", "com banco de palavras". */
   formato_preferido?: string;
   /**
@@ -237,12 +239,26 @@ Se o professor exigiu preservar o texto original, o texto dele fica como está: 
 concisão vale para o que VOCÊ escreve — enunciados, exemplos e apoios.`;
 
 const MENOS_TEXTO = `==================================================
-O MAIS IMPORTANTE: MENOS TEXTO E BANCO DE PALAVRAS
+O MAIS IMPORTANTE — PEDIDOS DAS PROFESSORAS QUE AVALIARAM O MATERIAL
 ==================================================
 
 - Escreva o MÍNIMO de texto. Corte toda frase que o estudante não precisa para fazer
   a atividade. Na dúvida, corte.
 - Toda questão em que o estudante escreve ou completa traz um BANCO DE PALAVRAS.
+- Organize as atividades em progressão: COMPREENDER, depois PRATICAR, depois PRODUZIR.
+- Não repita a mesma habilidade em partes ou páginas diferentes (por exemplo, duas
+  partes de marcar a alternativa certa sobre o mesmo texto), exceto quando a repetição
+  for intencional e justificada — e então diga o porquê nas orientações ao professor.
+- Priorize a qualidade e a relevância dos exercícios, não a quantidade. Poucos
+  exercícios bons valem mais que muitos parecidos.
+- Para estudante em processo de alfabetização, ofereça apoio à escrita quando ele for
+  necessário: banco de palavras, frase iniciada, modelo ao lado, letras ou sílabas para
+  escolher.
+- Não exija produção textual extensa sem considerar o perfil: a escrita pedida cabe no
+  que o estudante consegue escrever hoje.
+- A extensão da atividade — e, com ela, o número de páginas — é definida pelo
+  conteúdo, pela complexidade e pelas necessidades do estudante, salvo quando o
+  professor fixou o número de páginas.
 - Se o professor exigiu preservar o texto original, esse texto fica como está; o
   corte vale para o resto.`;
 
@@ -416,6 +432,16 @@ function blocoPreferencias(p: PedidoProfessor): string {
       `- A atividade tem EXATAMENTE ${p.quantidade_questoes} ${
         p.quantidade_questoes === 1 ? "questão" : "questões"
       } numeradas. Não entregue mais nem menos; isso é verificado depois.`,
+    );
+  }
+  if (p.quantidade_paginas && p.quantidade_paginas > 0) {
+    const n = p.quantidade_paginas;
+    itens.push(
+      `- A folha impressa terá ${n} ${n === 1 ? "página" : "páginas"} A4. Dimensione a atividade ` +
+        `para preencher ${n === 1 ? "essa página" : "essas páginas"} com folga: nem apertada, ` +
+        "nem com exercícios a mais só para ocupar espaço. Para ter medida: uma página comporta " +
+        "umas 30 linhas em letra grande, contando título, enunciados, alternativas e linhas de " +
+        "resposta; uma ilustração ocupa o lugar de umas 10.",
     );
   }
   if (p.formato_preferido) itens.push(`- Formato pedido pelo professor: ${p.formato_preferido}.`);
